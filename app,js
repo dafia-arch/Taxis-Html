@@ -139,8 +139,13 @@ function actualizarCamposDeViaje() {
   const viaje = document.getElementById('viaje').value;
   const entrada = viaje === 'Entrada' || viaje === 'Redondo';
   const salida = viaje === 'Salida' || viaje === 'Redondo';
-  ['fechaEntradaContenedor', 'horaEntradaContenedor'].forEach(id => document.getElementById(id).classList.toggle('hidden', !entrada));
-  ['fechaSalidaContenedor', 'horaSalidaContenedor'].forEach(id => document.getElementById(id).classList.toggle('hidden', !salida));
+  const cambiarVisibilidad = (id, visible) => {
+    const elemento = document.getElementById(id);
+    elemento.classList.toggle('hidden', !visible);
+    elemento.classList.toggle('block', visible);
+  };
+  ['fechaEntradaContenedor', 'horaEntradaContenedor'].forEach(id => cambiarVisibilidad(id, entrada));
+  ['fechaSalidaContenedor', 'horaSalidaContenedor'].forEach(id => cambiarVisibilidad(id, salida));
   document.getElementById('fechaEntrada').required = entrada;
   document.getElementById('horaEntrada').required = entrada;
   document.getElementById('fechaSalida').required = salida;
