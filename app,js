@@ -16,7 +16,7 @@ const mapaMasivoContainer = document.getElementById('mapaMasivoContainer');
 const mapaIframeMasivo = document.getElementById('mapaIframeMasivo');
 const linkGoogleMapsMasivo = document.getElementById('linkGoogleMapsMasivo');
 const direccionMasiva = document.getElementById('direccionMasiva');
-const columnasMasivas = ['localidad', 'departamento', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
+const columnasMasivas = ['localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
 
 function normalizarCp(valor) {
   return String(valor || '').replace(/\D/g, '').slice(0, 5);
@@ -106,19 +106,45 @@ function actualizarMapaIndividual() {
 
 function valoresDeFila(fila) {
   return [...fila.cells].reduce((datos, celda, indice) => {
-    datos[columnasMasivas[indice]] = celda.textContent.trim();
+    const columna = columnasMasivas[indice];
+    if (columna === 'viaje') {
+      datos.viaje = celda.querySelector('select')?.value || '';
+    } else if (columna === 'fecha') {
+      const fecha = celda.querySelector('input');
+      const viaje = datos.viaje;
+      datos.fechaEntrada = viaje === 'Entrada' || viaje === 'Redondo' ? fecha?.value || '' : '';
+      datos.fechaSalida = viaje === 'Salida' || viaje === 'Redondo' ? fecha?.value || '' : '';
+    } else if (columna === 'horarios') {
+      datos.horaEntrada = celda.querySelector('[data-horario="entrada"]')?.value || '';
+      datos.horaSalida = celda.querySelector('[data-horario="salida"]')?.value || '';
+      datos.horarios = [datos.horaEntrada, datos.horaSalida].filter(Boolean).join(' / ');
+    } else {
+      datos[columna] = celda.textContent.trim();
+    }
     return datos;
   }, {});
 }
 
 function valoresIndividuales() {
-  const ids = ['localidad', 'departamento', 'viaje', 'numEmp', 'nombreEmp', 'fecha', 'horaEntrada', 'horaSalida', 'cpInput', 'ciudadInput', 'calleInput', 'numeroInput', 'telefono', 'comentario'];
+  const ids = ['localidad', 'viaje', 'numEmp', 'nombreEmp', 'fechaEntrada', 'fechaSalida', 'horaEntrada', 'horaSalida', 'cpInput', 'ciudadInput', 'calleInput', 'numeroInput', 'telefono', 'comentario'];
   const datos = ids.reduce((resultado, id) => {
     resultado[id] = document.getElementById(id).value.trim();
     return resultado;
   }, {});
   datos.colonia = coloniaSelect.classList.contains('hidden') ? coloniaInput.value.trim() : coloniaSelect.value.trim();
   return datos;
+}
+
+function actualizarCamposDeViaje() {
+  const viaje = document.getElementById('viaje').value;
+  const entrada = viaje === 'Entrada' || viaje === 'Redondo';
+  const salida = viaje === 'Salida' || viaje === 'Redondo';
+  ['fechaEntradaContenedor', 'horaEntradaContenedor'].forEach(id => document.getElementById(id).classList.toggle('hidden', !entrada));
+  ['fechaSalidaContenedor', 'horaSalidaContenedor'].forEach(id => document.getElementById(id).classList.toggle('hidden', !salida));
+  document.getElementById('fechaEntrada').required = entrada;
+  document.getElementById('horaEntrada').required = entrada;
+  document.getElementById('fechaSalida').required = salida;
+  document.getElementById('horaSalida').required = salida;
 }
 
 function actualizarMapaMasivo(fila) {
@@ -138,30 +164,62 @@ function actualizarMapaMasivo(fila) {
   fila.dataset.urlMapa = enlaces.googleMaps;
 }
 
+function actualizarCamposDeFila(fila) {
+  const viaje = fila.cells[1].querySelector('select')?.value || '';
+  const mostrarEntrada = viaje === 'Entrada' || viaje === 'Redondo';
+  const mostrarSalida = viaje === 'Salida' || viaje === 'Redondo';
+  fila.querySelector('[data-horario="entrada"]').classList.toggle('hidden', !mostrarEntrada);
+  fila.querySelector('[data-horario="salida"]').classList.toggle('hidden', !mostrarSalida);
+}
+
 function crearFilaMasiva(valores = {}) {
   const fila = document.createElement('tr');
   fila.className = 'border-t border-slate-200 align-top hover:bg-slate-50';
   columnasMasivas.forEach((columna, indice) => {
     const celda = document.createElement('td');
-    celda.contentEditable = 'true';
     celda.dataset.columna = columna;
     celda.className = 'min-w-[105px] px-3 py-3';
-    celda.textContent = valores[columna] || '';
-    if (columna === 'cp') celda.classList.add('font-semibold', 'text-blue-700');
+    if (columna === 'viaje') {
+      const select = document.createElement('select');
+      select.className = 'w-full rounded-lg border border-slate-300 bg-white px-2 py-2';
+      ['', 'Entrada', 'Salida', 'Redondo'].forEach(opcion => select.add(new Option(opcion || 'Seleccione...', opcion)));
+      select.value = valores.viaje || '';
+      celda.appendChild(select);
+    } else if (columna === 'fecha') {
+      const input = document.createElement('input');
+      input.type = 'date';
+      input.className = 'w-full rounded-lg border border-slate-300 px-2 py-2';
+      input.value = valores.fechaEntrada || valores.fechaSalida || '';
+      celda.appendChild(input);
+    } else if (columna === 'horarios') {
+      ['entrada', 'salida'].forEach(tipo => {
+        const input = document.createElement('input');
+        input.type = 'time';
+        input.dataset.horario = tipo;
+        input.className = 'mb-1 w-full rounded-lg border border-slate-300 px-2 py-2';
+        input.value = valores[`hora${tipo[0].toUpperCase()}${tipo.slice(1)}`] || '';
+        celda.appendChild(input);
+      });
+    } else {
+      celda.contentEditable = 'true';
+      celda.textContent = valores[columna] || '';
+      if (columna === 'cp') celda.classList.add('font-semibold', 'text-blue-700');
+    }
     fila.appendChild(celda);
   });
   cuerpoTablaMasivo.appendChild(fila);
+  actualizarCamposDeFila(fila);
   return fila;
 }
 
 function aplicarLookupFila(fila) {
   const celdas = fila.cells;
-  const cp = normalizarCp(celdas[5].textContent);
-  celdas[5].textContent = cp;
+  const cp = normalizarCp(celdas[4].textContent);
+  celdas[4].textContent = cp;
   if (cp.length !== 5) return;
   const datos = lookupCp(cp);
-  celdas[6].textContent = datos?.ciudad || '';
-  celdas[7].textContent = datos?.colonias.length === 1 ? datos.colonias[0] : '';
+  celdas[5].textContent = datos?.ciudad || '';
+  celdas[6].textContent = datos?.colonias.length === 1 ? datos.colonias[0] : '';
   actualizarMapaMasivo(fila);
 }
 
@@ -171,6 +229,9 @@ servicioSelect.addEventListener('change', () => {
   seccionMasivo.classList.toggle('hidden', !masivo);
   if (masivo && !cuerpoTablaMasivo.children.length) crearFilaMasiva();
 });
+
+document.getElementById('viaje').addEventListener('change', actualizarCamposDeViaje);
+actualizarCamposDeViaje();
 
 cpInput.addEventListener('input', event => {
   event.target.value = normalizarCp(event.target.value);
@@ -197,6 +258,13 @@ cuerpoTablaMasivo.addEventListener('input', event => {
   if (!fila) return;
   if (event.target.dataset.columna === 'cp') aplicarLookupFila(fila);
   else if (fila.classList.contains('fila-seleccionada')) actualizarMapaMasivo(fila);
+});
+
+cuerpoTablaMasivo.addEventListener('change', event => {
+  const fila = event.target.closest('tr');
+  if (!fila) return;
+  if (event.target.tagName === 'SELECT') actualizarCamposDeFila(fila);
+  if (fila.classList.contains('fila-seleccionada')) actualizarMapaMasivo(fila);
 });
 
 document.getElementById('btnAgregarFila').addEventListener('click', () => crearFilaMasiva());

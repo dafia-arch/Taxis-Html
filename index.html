@@ -57,20 +57,12 @@
             </select>
           </label>
 
-          <label class="block text-sm font-semibold text-slate-700">Departamento
-            <select id="departamento" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
-              <option value="">Seleccione...</option>
-              <option value="SPC">SPC</option>
-              <option value="Markers">Markers</option>
-              <option value="Mantenimiento">Mantenimiento</option>
-            </select>
-          </label>
-
           <label class="block text-sm font-semibold text-slate-700">Viaje
             <select id="viaje" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
               <option value="">Seleccione...</option>
               <option value="Entrada">Entrada</option>
               <option value="Salida">Salida</option>
+              <option value="Redondo">Redondo</option>
             </select>
           </label>
 
@@ -82,15 +74,19 @@
             <input type="text" id="nombreEmp" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="Nombre completo">
           </label>
 
-          <label class="block text-sm font-semibold text-slate-700">Fecha
-            <input type="date" id="fecha" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+          <label id="fechaEntradaContenedor" class="hidden block text-sm font-semibold text-slate-700">Fecha de entrada
+            <input type="date" id="fechaEntrada" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
           </label>
 
-          <label class="block text-sm font-semibold text-slate-700">Horario de entrada
+          <label id="fechaSalidaContenedor" class="hidden block text-sm font-semibold text-slate-700">Fecha de salida
+            <input type="date" id="fechaSalida" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+          </label>
+
+          <label id="horaEntradaContenedor" class="hidden block text-sm font-semibold text-slate-700">Horario de entrada
             <input type="time" id="horaEntrada" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
           </label>
 
-          <label class="block text-sm font-semibold text-slate-700">Horario de salida
+          <label id="horaSalidaContenedor" class="hidden block text-sm font-semibold text-slate-700">Horario de salida
             <input type="time" id="horaSalida" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
           </label>
 
@@ -158,7 +154,6 @@
             <thead class="bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
               <tr>
                 <th class="px-3 py-3">Localidad</th>
-                <th class="px-3 py-3">Departamento</th>
                 <th class="px-3 py-3">Viaje</th>
                 <th class="px-3 py-3">Fecha</th>
                 <th class="px-3 py-3">Horarios</th>
