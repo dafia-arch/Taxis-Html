@@ -2,12 +2,19 @@
 .fila-seleccionada {
   background-color: #eff6ff !important; /* bg-blue-50 */
 }
-/* Celdas editables para copiar y pegar como Excel */
-td[contenteditable="true"]:focus {
-  outline: 2px solid #3b82f6;
-  outline-offset: -2px;
-  background-color: #ffffff;
+
+/* Evitar que la copia desde la tabla se convierta en un bloque único al pegar en Excel */
+#tablaMasivo td,
+#tablaMasivo th {
+  user-select: text;
 }
+
+#tablaMasivo td input,
+#tablaMasivo td textarea,
+#tablaMasivo td select {
+  font: inherit;
+}
+
 td {
   cursor: text;
 }

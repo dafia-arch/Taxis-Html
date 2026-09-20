@@ -179,6 +179,48 @@ function actualizarCamposDeFila(fila) {
   fila.querySelector('[data-horario="salida"]').classList.toggle('hidden', !mostrarSalida);
 }
 
+function textoCeldaMasiva(celda) {
+  if (!celda) return '';
+  const control = celda.querySelector('input, textarea, select');
+  const valor = control ? control.value : celda.textContent;
+  return String(valor ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function serializarTablaMasiva() {
+  return [...cuerpoTablaMasivo.rows].map(fila => {
+    const celdas = Array.from(fila.cells).slice(0, -1);
+    return celdas.map(textoCeldaMasiva).join('\t');
+  }).join('\n');
+}
+
+async function copiarTablaMasiva() {
+  const texto = serializarTablaMasiva();
+  if (!texto.trim()) {
+    alert('No hay filas para copiar.');
+    return;
+  }
+
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(texto);
+    } else {
+      const helper = document.createElement('textarea');
+      helper.value = texto;
+      helper.setAttribute('readonly', '');
+      helper.style.position = 'fixed';
+      helper.style.left = '-9999px';
+      document.body.appendChild(helper);
+      helper.select();
+      document.execCommand('copy');
+      document.body.removeChild(helper);
+    }
+    alert('Tabla copiada en formato tabular. Pégala en Excel y se separará por columnas.');
+  } catch (error) {
+    console.error('No se pudo copiar la tabla:', error);
+    alert('No se pudo copiar la tabla. Intenta usar el botón de copiar nuevamente.');
+  }
+}
+
 function crearFilaMasiva(valores = {}) {
   const fila = document.createElement('tr');
   fila.className = 'border-t border-slate-200 align-top hover:bg-slate-50';
@@ -226,8 +268,15 @@ function crearFilaMasiva(valores = {}) {
       });
       celda.appendChild(input);
     } else {
-      celda.contentEditable = 'true';
-      celda.textContent = valores[columna] || '';
+      const esComentario = columna === 'comentario';
+      const control = esComentario ? document.createElement('textarea') : document.createElement('input');
+      if (!esComentario) control.type = 'text';
+      control.value = valores[columna] || '';
+      control.className = esComentario
+        ? 'w-full resize-none rounded-lg border border-slate-300 bg-white px-2 py-2'
+        : 'w-full rounded-lg border border-slate-300 bg-white px-2 py-2';
+      if (esComentario) control.rows = 2;
+      celda.appendChild(control);
     }
     fila.appendChild(celda);
   });
@@ -325,7 +374,20 @@ cuerpoTablaMasivo.addEventListener('change', event => {
   if (fila.classList.contains('fila-seleccionada')) actualizarMapaMasivo(fila);
 });
 
+cuerpoTablaMasivo.addEventListener('copy', event => {
+  const tabla = event.target.closest('#tablaMasivo');
+  if (!tabla) return;
+  const texto = serializarTablaMasiva();
+  if (!texto.trim()) return;
+
+  event.preventDefault();
+  event.clipboardData.setData('text/plain', texto);
+  event.clipboardData.setData('text/tab-separated-values', texto);
+  event.clipboardData.setData('text/csv', texto.replace(/\t/g, ','));
+});
+
 document.getElementById('btnAgregarFila').addEventListener('click', () => crearFilaMasiva());
+document.getElementById('btnCopiarTablaMasiva').addEventListener('click', copiarTablaMasiva);
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
