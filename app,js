@@ -111,6 +111,16 @@ function valoresDeFila(fila) {
   }, {});
 }
 
+function valoresIndividuales() {
+  const ids = ['localidad', 'departamento', 'viaje', 'numEmp', 'nombreEmp', 'fecha', 'horaEntrada', 'horaSalida', 'cpInput', 'ciudadInput', 'calleInput', 'numeroInput', 'telefono', 'comentario'];
+  const datos = ids.reduce((resultado, id) => {
+    resultado[id] = document.getElementById(id).value.trim();
+    return resultado;
+  }, {});
+  datos.colonia = coloniaSelect.classList.contains('hidden') ? coloniaInput.value.trim() : coloniaSelect.value.trim();
+  return datos;
+}
+
 function actualizarMapaMasivo(fila) {
   const datos = valoresDeFila(fila);
   const direccion = [datos.calle, datos.numero, datos.colonia, datos.ciudad, datos.cp, 'México']
@@ -196,7 +206,7 @@ form.addEventListener('submit', async event => {
   const esMasivo = servicioSelect.value === 'Masivo';
   const payload = esMasivo
     ? { tipoServicio: 'Masivo', solicitudes: [...cuerpoTablaMasivo.rows].map(fila => ({ ...valoresDeFila(fila), ligaGoogleMaps: fila.dataset.urlMapa || enlacesDeDireccion([valoresDeFila(fila).calle, valoresDeFila(fila).numero, valoresDeFila(fila).colonia, valoresDeFila(fila).ciudad, valoresDeFila(fila).cp, 'México'].filter(Boolean).join(', ')).googleMaps })) }
-    : { tipoServicio: 'Individual', ligaGoogleMaps: btnEnviar.dataset.urlMapa || '', datos: Object.fromEntries(new FormData(form)) };
+    : { tipoServicio: 'Individual', ligaGoogleMaps: btnEnviar.dataset.urlMapa || '', datos: valoresIndividuales() };
   btnEnviar.disabled = true;
   btnEnviar.textContent = 'Enviando...';
   try {
