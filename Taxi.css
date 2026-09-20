@@ -1,10 +1,13 @@
-/* Estilos adicionales mínimos ya que Tailwind vía CDN maneja la estructura principal */
-html {
-  scroll-behavior: smooth;
+/* Resaltar fila seleccionada en el masivo */
+.fila-seleccionada {
+  background-color: #eff6ff !important; /* bg-blue-50 */
 }
-.hidden {
-  display: none !important;
+/* Celdas editables para copiar y pegar como Excel */
+td[contenteditable="true"]:focus {
+  outline: 2px solid #3b82f6;
+  outline-offset: -2px;
+  background-color: #ffffff;
 }
-.block {
-  display: block !important;
+td {
+  cursor: text;
 }
