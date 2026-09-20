@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solicitud de Taxi BIC</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- SheetJS para leer Excel en Vanilla JS -->
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_35%,_#e2e8f0_100%)] px-4 py-10 text-slate-800 sm:px-6">
+  <div class="mx-auto max-w-6xl overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/90 shadow-[0_30px_80px_rgba(15,23,42,0.12)] backdrop-blur-sm">
+    <header class="relative overflow-hidden border-b border-slate-200 bg-slate-950 px-6 py-7 sm:px-8">
+      <div class="absolute inset-0 bg-[linear-gradient(135deg,rgba(59,130,246,0.18),transparent_45%,rgba(14,165,233,0.12))]"></div>
+      <div class="relative flex flex-col gap-5 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-[0.28em] text-blue-300">Transporte corporativo</p>
+          <h1 class="mt-2 text-3xl font-black tracking-tight text-white sm:text-4xl">
+            Solicitud de Taxi <span class="text-blue-400">BIC</span>
+          </h1>
+        </div>
+      </div>
+    </header>
+
+    <form id="taxiForm" class="space-y-7 p-5 sm:p-8">
+      <section class="rounded-3xl border border-slate-200 bg-slate-50/80 p-5 shadow-sm">
+        <label class="block text-sm font-semibold text-slate-700">Tipo de servicio</label>
+        <select id="servicioSelect" class="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-base font-medium shadow-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+          <option value="Individual">Individual</option>
+          <option value="Masivo">Masivo</option>
+          <option value="Enfermeria">Enfermería</option>
+        </select>
+      </section>
+
+      <!-- Sección Individual -->
+      <section id="seccionIndividual" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_8px_30px_rgba(15,23,42,0.04)] sm:p-6 block">
+        <h2 class="text-xl font-bold text-slate-800 mb-5">Datos del servicio (Individual)</h2>
+        <div class="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <label class="block text-sm font-semibold text-slate-700">Localidad
+            <select class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5">
+              <option value="">Seleccione...</option>
+              <option value="3A">Planta 3A</option>
+              <option value="3B">Planta 3B</option>
+            </select>
+          </label>
+          
+          <label class="block text-sm font-semibold text-slate-700">No. Empleado
+            <input type="text" id="numEmp" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5" placeholder="12345" required />
+          </label>
+          
+          <label class="block text-sm font-semibold text-slate-700">Código postal
+            <input type="text" id="cpInput" maxlength="5" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5" placeholder="25900" required />
+          </label>
+
+          <label class="block text-sm font-semibold text-slate-700">Ciudad
+            <input type="text" id="ciudadInput" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5" placeholder="Saltillo" required />
+          </label>
+
+          <label class="block text-sm font-semibold text-slate-700">Colonia
+            <select id="coloniaSelect" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 hidden"></select>
+            <input type="text" id="coloniaInput" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5" placeholder="Ingrese colonia" required />
+          </label>
+
+          <label class="block text-sm font-semibold text-slate-700 md:col-span-2">Calle
+            <input type="text" id="calleInput" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5" required />
+          </label>
+          
+          <label class="block text-sm font-semibold text-slate-700">Número
+            <input type="text" id="numeroInput" class="mt-2 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5" required />
+          </label>
+        </div>
+
+        <div id="mapaContainer" class="mt-6 border-t border-slate-200 pt-6 hidden">
+          <p class="font-bold text-blue-800">Mapa del taxista</p>
+          <iframe id="mapaIframe" class="h-56 w-full rounded-2xl border-0 mt-3" loading="lazy" allowfullscreen></iframe>
+        </div>
+      </section>
+
+      <!-- Sección Masivo -->
+      <section id="seccionMasivo" class="rounded-3xl border border-slate-200 bg-white p-5 shadow-[0_8px_30px_rgba(15,23,42,0.04)] sm:p-6 hidden">
+        <h2 class="text-xl font-bold text-slate-800 mb-5">Carga masiva (Excel/CSV)</h2>
+        <label class="flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-6 text-center hover:bg-blue-50">
+          <span class="text-sm font-semibold text-slate-700">Sube tu archivo de rutas</span>
+          <input type="file" id="excelUpload" accept=".xlsx,.xls,.csv" class="hidden" />
+        </label>
+        <div id="tablaMasivaContainer" class="mt-5 overflow-auto hidden">
+           <table class="min-w-full text-sm text-left">
+             <thead class="bg-slate-100"><tr id="tablaMasivaHead"></tr></thead>
+             <tbody id="tablaMasivaBody" class="divide-y divide-slate-200"></tbody>
+           </table>
+        </div>
+      </section>
+
+      <div class="flex justify-end">
+        <button type="submit" id="submitBtn" class="rounded-2xl bg-gradient-to-r from-blue-700 to-cyan-600 px-7 py-3.5 font-bold text-white shadow-lg hover:shadow-xl">
+          Confirmar solicitud
+        </button>
+      </div>
+    </form>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

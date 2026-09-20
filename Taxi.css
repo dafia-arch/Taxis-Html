@@ -1,0 +1,10 @@
+/* Estilos adicionales mínimos ya que Tailwind vía CDN maneja la estructura principal */
+html {
+  scroll-behavior: smooth;
+}
+.hidden {
+  display: none !important;
+}
+.block {
+  display: block !important;
+}
