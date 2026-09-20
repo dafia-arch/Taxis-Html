@@ -1,79 +1,214 @@
-// 1. Base de datos incrustada (Evita errores CORS al abrir el archivo localmente)
-const cpData = [
-  { cp: '25900', ciudad: 'Ramos Arizpe', colonias: ['Centro', 'San Jerónimo', 'Cumbres', 'Contry'] },
-  { cp: '25903', ciudad: 'Ramos Arizpe', colonias: ['Manantiales', 'El Mirador', 'Paseo de la Sierra'] },
-  { cp: '25280', ciudad: 'Saltillo', colonias: ['Del Valle', 'San Miguel', 'República'] },
-  { cp: '25000', ciudad: 'Saltillo', colonias: ['Zona Centro', 'Las Fuentes'] }
-];
-
-// 2. Referencias al DOM
+const cpData = new Map();
+const form = document.getElementById('taxiForm');
+const servicioSelect = document.getElementById('servicioSelect');
+const seccionIndividual = document.getElementById('seccionIndividual');
+const seccionMasivo = document.getElementById('seccionMasivo');
+const btnEnviar = document.getElementById('btnEnviar');
 const cpInput = document.getElementById('cpInput');
 const ciudadInput = document.getElementById('ciudadInput');
 const coloniaSelect = document.getElementById('coloniaSelect');
 const coloniaInput = document.getElementById('coloniaInput');
-const calleInput = document.getElementById('calleInput');
-const numeroInput = document.getElementById('numeroInput');
 const mapaContainer = document.getElementById('mapaContainer');
 const mapaIframe = document.getElementById('mapaIframe');
 const linkGoogleMaps = document.getElementById('linkGoogleMaps');
+const cuerpoTablaMasivo = document.getElementById('cuerpoTablaMasivo');
+const mapaMasivoContainer = document.getElementById('mapaMasivoContainer');
+const mapaIframeMasivo = document.getElementById('mapaIframeMasivo');
+const linkGoogleMapsMasivo = document.getElementById('linkGoogleMapsMasivo');
+const direccionMasiva = document.getElementById('direccionMasiva');
+const columnasMasivas = ['localidad', 'departamento', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
 
-// 3. Lógica del Código Postal (Búsqueda inmediata)
-cpInput.addEventListener('input', (e) => {
-  // Solo permitir números
-  const cp = e.target.value.replace(/\D/g, '').slice(0, 5);
-  e.target.value = cp;
-
-  if (cp.length === 5) {
-    const match = cpData.find(item => item.cp === cp);
-
-    if (match) {
-      // Se encontró el CP
-      ciudadInput.value = match.ciudad;
-      ciudadInput.readOnly = true;
-      
-      // Llenar select de colonias y ocultar input de texto
-      coloniaSelect.innerHTML = '<option value="">Seleccione...</option>' + 
-        match.colonias.map(c => `<option value="${c}">${c}</option>`).join('');
-      coloniaSelect.classList.remove('hidden');
-      coloniaInput.classList.add('hidden');
-    } else {
-      // CP no encontrado, habilitar inputs manuales
-      ciudadInput.readOnly = false;
-      coloniaSelect.classList.add('hidden');
-      coloniaInput.classList.remove('hidden');
-    }
-    actualizarMapa();
-  }
-});
-
-// 4. Lógica de Actualización del Mapa
-function actualizarMapa() {
-  const calle = calleInput.value.trim();
-  const numero = numeroInput.value.trim();
-  const colonia = coloniaSelect.classList.contains('hidden') ? coloniaInput.value.trim() : coloniaSelect.value.trim();
-  const ciudad = ciudadInput.value.trim();
-  const cp = cpInput.value.trim();
-
-  // Si hay datos suficientes, mostrar el mapa
-  if (calle && ciudad && colonia) {
-    const direccion = `${calle} ${numero}, ${colonia}, ${ciudad}, ${cp}, Mexico`.trim();
-    // Reemplazar espacios múltiples y codificar para la URL
-    const query = encodeURIComponent(direccion.replace(/\s+/g, ' '));
-    
-    mapaIframe.src = `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`;
-    linkGoogleMaps.href = `https://www.google.com/maps/search/?api=1&query=${query}`;
-    
-    mapaContainer.classList.remove('hidden');
-    
-    // Guardamos la liga en el botón para Power Automate
-    document.getElementById('btnEnviar').dataset.urlMapa = linkGoogleMaps.href;
-  }
+function normalizarCp(valor) {
+  return String(valor || '').replace(/\D/g, '').slice(0, 5);
 }
 
-// Escuchar cambios en los campos de dirección para actualizar el mapa en tiempo real
-['input', 'change'].forEach(evt => {
-  calleInput.addEventListener(evt, actualizarMapa);
-  numeroInput.addEventListener(evt, actualizarMapa);
-  coloniaSelect.addEventListener(evt, actualizarMapa);
-  coloniaInput.addEventListener(evt, actualizarMapa);
+function agruparCp(registros) {
+  registros.forEach(registro => {
+    const cp = normalizarCp(registro.codigo || registro.cp);
+    if (!cp) return;
+    if (!cpData.has(cp)) {
+      cpData.set(cp, { ciudad: registro.municipio || registro.ciudad || '', colonias: [] });
+    }
+    const colonia = registro.colonia || '';
+    if (colonia && !cpData.get(cp).colonias.includes(colonia)) cpData.get(cp).colonias.push(colonia);
+  });
+}
+
+async function cargarCp() {
+  const response = await fetch('cp_mexico.json');
+  if (!response.ok) throw new Error(`No se pudo cargar cp_mexico.json (${response.status})`);
+  agruparCp(await response.json());
+
+  const datalist = document.createElement('datalist');
+  datalist.id = 'listaCodigosPostales';
+  cpData.forEach((datos, cp) => {
+    const option = document.createElement('option');
+    option.value = cp;
+    option.label = datos.ciudad;
+    datalist.appendChild(option);
+  });
+  document.body.appendChild(datalist);
+  cpInput.setAttribute('list', datalist.id);
+}
+
+function llenarColonias(select, input, datos) {
+  if (!datos || !datos.colonias.length) {
+    select.classList.add('hidden');
+    input.classList.remove('hidden');
+    return;
+  }
+  select.replaceChildren(new Option('Seleccione...', ''));
+  datos.colonias.forEach(colonia => select.add(new Option(colonia, colonia)));
+  select.classList.remove('hidden');
+  input.classList.add('hidden');
+}
+
+function lookupCp(cp, destino = {}) {
+  const codigo = normalizarCp(cp);
+  const datos = cpData.get(codigo);
+  if (destino.ciudad) destino.ciudad.value = datos?.ciudad || '';
+  if (destino.coloniaSelect && destino.coloniaInput) llenarColonias(destino.coloniaSelect, destino.coloniaInput, datos);
+  return datos;
+}
+
+function direccionDeCampos(campos) {
+  const colonia = campos.coloniaSelect && !campos.coloniaSelect.classList.contains('hidden')
+    ? campos.coloniaSelect.value
+    : campos.colonia?.value || '';
+  return [campos.calle?.value, campos.numero?.value, colonia, campos.ciudad?.value, campos.cp?.value, 'México']
+    .map(valor => String(valor || '').trim()).filter(Boolean).join(', ');
+}
+
+function enlacesDeDireccion(direccion) {
+  const query = encodeURIComponent(direccion.replace(/\s+/g, ' '));
+  return {
+    mapa: `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`,
+    googleMaps: `https://www.google.com/maps/search/?api=1&query=${query}`
+  };
+}
+
+function actualizarMapaIndividual() {
+  const direccion = direccionDeCampos({
+    cp: cpInput, ciudad: ciudadInput, coloniaSelect, colonia: coloniaInput,
+    calle: document.getElementById('calleInput'), numero: document.getElementById('numeroInput')
+  });
+  if (!direccion || !document.getElementById('calleInput').value.trim() || !ciudadInput.value.trim() || (!coloniaInput.value.trim() && !coloniaSelect.value.trim())) {
+    mapaContainer.classList.add('hidden');
+    btnEnviar.dataset.urlMapa = '';
+    return;
+  }
+  const enlaces = enlacesDeDireccion(direccion);
+  mapaIframe.src = enlaces.mapa;
+  linkGoogleMaps.href = enlaces.googleMaps;
+  mapaContainer.classList.remove('hidden');
+  btnEnviar.dataset.urlMapa = enlaces.googleMaps;
+}
+
+function valoresDeFila(fila) {
+  return [...fila.cells].reduce((datos, celda, indice) => {
+    datos[columnasMasivas[indice]] = celda.textContent.trim();
+    return datos;
+  }, {});
+}
+
+function actualizarMapaMasivo(fila) {
+  const datos = valoresDeFila(fila);
+  const direccion = [datos.calle, datos.numero, datos.colonia, datos.ciudad, datos.cp, 'México']
+    .filter(Boolean).join(', ');
+  if (!datos.calle || !datos.ciudad || !datos.colonia) {
+    mapaMasivoContainer.classList.add('hidden');
+    fila.dataset.urlMapa = '';
+    return;
+  }
+  const enlaces = enlacesDeDireccion(direccion);
+  mapaIframeMasivo.src = enlaces.mapa;
+  linkGoogleMapsMasivo.href = enlaces.googleMaps;
+  direccionMasiva.textContent = direccion;
+  mapaMasivoContainer.classList.remove('hidden');
+  fila.dataset.urlMapa = enlaces.googleMaps;
+}
+
+function crearFilaMasiva(valores = {}) {
+  const fila = document.createElement('tr');
+  fila.className = 'border-t border-slate-200 align-top hover:bg-slate-50';
+  columnasMasivas.forEach((columna, indice) => {
+    const celda = document.createElement('td');
+    celda.contentEditable = 'true';
+    celda.dataset.columna = columna;
+    celda.className = 'min-w-[105px] px-3 py-3';
+    celda.textContent = valores[columna] || '';
+    if (columna === 'cp') celda.classList.add('font-semibold', 'text-blue-700');
+    fila.appendChild(celda);
+  });
+  cuerpoTablaMasivo.appendChild(fila);
+  return fila;
+}
+
+function aplicarLookupFila(fila) {
+  const celdas = fila.cells;
+  const cp = normalizarCp(celdas[5].textContent);
+  celdas[5].textContent = cp;
+  if (cp.length !== 5) return;
+  const datos = lookupCp(cp);
+  celdas[6].textContent = datos?.ciudad || '';
+  celdas[7].textContent = datos?.colonias.length === 1 ? datos.colonias[0] : '';
+  actualizarMapaMasivo(fila);
+}
+
+servicioSelect.addEventListener('change', () => {
+  const masivo = servicioSelect.value === 'Masivo';
+  seccionIndividual.classList.toggle('hidden', masivo);
+  seccionMasivo.classList.toggle('hidden', !masivo);
+  if (masivo && !cuerpoTablaMasivo.children.length) crearFilaMasiva();
 });
+
+cpInput.addEventListener('input', event => {
+  event.target.value = normalizarCp(event.target.value);
+  if (event.target.value.length === 5) lookupCp(event.target.value, { ciudad: ciudadInput, coloniaSelect, coloniaInput });
+  actualizarMapaIndividual();
+});
+
+['input', 'change'].forEach(evento => {
+  ['calleInput', 'numeroInput', 'ciudadInput', 'coloniaInput', 'coloniaSelect'].forEach(id => {
+    document.getElementById(id).addEventListener(evento, actualizarMapaIndividual);
+  });
+});
+
+cuerpoTablaMasivo.addEventListener('click', event => {
+  const fila = event.target.closest('tr');
+  if (!fila) return;
+  cuerpoTablaMasivo.querySelectorAll('tr').forEach(elemento => elemento.classList.remove('fila-seleccionada'));
+  fila.classList.add('fila-seleccionada');
+  actualizarMapaMasivo(fila);
+});
+
+cuerpoTablaMasivo.addEventListener('input', event => {
+  const fila = event.target.closest('tr');
+  if (!fila) return;
+  if (event.target.dataset.columna === 'cp') aplicarLookupFila(fila);
+  else if (fila.classList.contains('fila-seleccionada')) actualizarMapaMasivo(fila);
+});
+
+document.getElementById('btnAgregarFila').addEventListener('click', () => crearFilaMasiva());
+
+form.addEventListener('submit', async event => {
+  event.preventDefault();
+  const esMasivo = servicioSelect.value === 'Masivo';
+  const payload = esMasivo
+    ? { tipoServicio: 'Masivo', solicitudes: [...cuerpoTablaMasivo.rows].map(fila => ({ ...valoresDeFila(fila), ligaGoogleMaps: fila.dataset.urlMapa || enlacesDeDireccion([valoresDeFila(fila).calle, valoresDeFila(fila).numero, valoresDeFila(fila).colonia, valoresDeFila(fila).ciudad, valoresDeFila(fila).cp, 'México'].filter(Boolean).join(', ')).googleMaps })) }
+    : { tipoServicio: 'Individual', ligaGoogleMaps: btnEnviar.dataset.urlMapa || '', datos: Object.fromEntries(new FormData(form)) };
+  btnEnviar.disabled = true;
+  btnEnviar.textContent = 'Enviando...';
+  try {
+    const response = await fetch('/api/taxi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!response.ok) throw new Error(`Power Automate respondió ${response.status}`);
+    btnEnviar.textContent = 'Solicitud enviada';
+  } catch (error) {
+    btnEnviar.disabled = false;
+    btnEnviar.textContent = 'Reintentar envío';
+    alert(error.message);
+  }
+});
+
+crearFilaMasiva();
+cargarCp().catch(error => console.error(error));
