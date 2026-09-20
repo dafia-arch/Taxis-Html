@@ -16,7 +16,7 @@ const mapaMasivoContainer = document.getElementById('mapaMasivoContainer');
 const mapaIframeMasivo = document.getElementById('mapaIframeMasivo');
 const linkGoogleMapsMasivo = document.getElementById('linkGoogleMapsMasivo');
 const direccionMasiva = document.getElementById('direccionMasiva');
-const columnasMasivas = ['localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
+const columnasMasivas = ['numEmp', 'nombreEmp', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
 
 function normalizarCp(valor) {
   return String(valor || '').replace(/\D/g, '').slice(0, 5);
@@ -186,7 +186,13 @@ function crearFilaMasiva(valores = {}) {
     const celda = document.createElement('td');
     celda.dataset.columna = columna;
     celda.className = 'min-w-[105px] px-3 py-3';
-    if (columna === 'viaje') {
+    if (columna === 'numEmp' || columna === 'nombreEmp') {
+      const input = document.createElement('input');
+      input.type = columna === 'numEmp' ? 'text' : 'text';
+      input.value = valores[columna] || '';
+      input.className = 'w-full rounded-lg border border-slate-300 bg-white px-2 py-2';
+      celda.appendChild(input);
+    } else if (columna === 'viaje') {
       const select = document.createElement('select');
       select.className = 'w-full rounded-lg border border-slate-300 bg-white px-2 py-2';
       ['', 'Entrada', 'Salida', 'Redondo'].forEach(opcion => select.add(new Option(opcion || 'Seleccione...', opcion)));
@@ -254,15 +260,15 @@ function crearFilaMasiva(valores = {}) {
 
 function aplicarLookupFila(fila) {
   const celdas = fila.cells;
-  const cpInputElement = celdas[4].querySelector('input');
-  const cp = normalizarCp(cpInputElement ? cpInputElement.value : celdas[4].textContent);
+  const cpInputElement = celdas[6].querySelector('input');
+  const cp = normalizarCp(cpInputElement ? cpInputElement.value : celdas[6].textContent);
   if (cpInputElement) cpInputElement.value = cp;
-  else celdas[4].textContent = cp;
+  else celdas[6].textContent = cp;
 
   if (cp.length !== 5) return;
   const datos = lookupCp(cp);
-  const ciudadCell = celdas[5];
-  const coloniaCell = celdas[6];
+  const ciudadCell = celdas[7];
+  const coloniaCell = celdas[8];
   const ciudadValue = datos?.ciudad || '';
   const coloniaValue = datos?.colonias?.length === 1 ? datos.colonias[0] : '';
 
