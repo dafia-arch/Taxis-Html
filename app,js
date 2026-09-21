@@ -17,6 +17,20 @@ const mapaIframeMasivo = document.getElementById('mapaIframeMasivo');
 const linkGoogleMapsMasivo = document.getElementById('linkGoogleMapsMasivo');
 const direccionMasiva = document.getElementById('direccionMasiva');
 const columnasMasivas = ['numEmp', 'nombreEmp', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
+const ADMIN_CREDENTIALS = { username: 'admin', password: 'admin123' };
+const STORAGE_KEY = 'taxiRequests';
+const adminPortal = document.getElementById('adminPortal');
+const adminLoginBox = document.getElementById('adminLoginBox');
+const adminDashboard = document.getElementById('adminDashboard');
+const adminUsuario = document.getElementById('adminUsuario');
+const adminPassword = document.getElementById('adminPassword');
+const tablaSolicitudesAdmin = document.getElementById('tablaSolicitudesAdmin');
+const gruposRutasAdmin = document.getElementById('gruposRutasAdmin');
+const modalRutas = document.getElementById('modalRutas');
+const modalRutasBody = document.getElementById('modalRutasBody');
+const contadorIndividuales = document.getElementById('contadorIndividuales');
+const contadorMasivas = document.getElementById('contadorMasivas');
+const contadorRutas = document.getElementById('contadorRutas');
 
 function normalizarCp(valor) {
   return String(valor || '').replace(/\D/g, '').slice(0, 5);
@@ -221,36 +235,395 @@ function csvMasiva() {
   return [encabezados.map(h => `"${h}"`).join(','), ...filas].join('\n');
 }
 
-async function copiarTablaMasiva() {
-  const texto = serializarTablaMasiva();
-  if (!texto.trim()) {
-    alert('No hay filas para copiar.');
+function obtenerSolicitudesGuardadas() {
+  try {
+    const almacenadas = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return Array.isArray(almacenadas) ? almacenadas : [];
+  } catch (error) {
+    console.error('No se pudieron leer las solicitudes guardadas:', error);
+    return [];
+  }
+}
+
+function guardarSolicitudes(solicitudes) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(solicitudes));
+}
+
+function registrarSolicitud(payload) {
+  const solicitudes = obtenerSolicitudesGuardadas();
+  const registros = payload.tipoServicio === 'Masivo'
+    ? (payload.solicitudes || []).map((item, index) => ({
+        id: `masiva-${Date.now()}-${index}`,
+        tipoServicio: 'Masivo',
+        nombre: item.nombreEmp || 'Cliente',
+        fecha: item.fechaEntrada || item.fechaSalida || item.fecha || new Date().toISOString().slice(0, 10),
+        hora: item.horaEntrada || item.horaSalida || '08:00',
+        direccion: [item.calle, item.numero, item.colonia, item.ciudad, item.cp, 'México'].filter(Boolean).join(', '),
+        ciudad: item.ciudad || '',
+        colonia: item.colonia || '',
+        cp: item.cp || '',
+        calle: item.calle || '',
+        numero: item.numero || '',
+        telefono: item.telefono || '',
+        comentario: item.comentario || ''
+      }))
+    : [{
+        id: `individual-${Date.now()}`,
+        tipoServicio: 'Individual',
+        nombre: payload.datos?.nombreEmp || 'Cliente',
+        fecha: payload.datos?.fechaEntrada || payload.datos?.fechaSalida || new Date().toISOString().slice(0, 10),
+        hora: payload.datos?.horaEntrada || payload.datos?.horaSalida || '08:00',
+        direccion: [payload.datos?.calleInput || payload.datos?.calle, payload.datos?.numeroInput || payload.datos?.numero, payload.datos?.colonia, payload.datos?.ciudadInput || payload.datos?.ciudad, payload.datos?.cpInput || payload.datos?.cp, 'México'].filter(Boolean).join(', '),
+        ciudad: payload.datos?.ciudadInput || payload.datos?.ciudad || '',
+        colonia: payload.datos?.colonia || '',
+        cp: payload.datos?.cpInput || payload.datos?.cp || '',
+        calle: payload.datos?.calleInput || payload.datos?.calle || '',
+        numero: payload.datos?.numeroInput || payload.datos?.numero || '',
+        telefono: payload.datos?.telefono || '',
+        comentario: payload.datos?.comentario || ''
+      }];
+
+  guardarSolicitudes([...solicitudes, ...registros]);
+  return registros;
+}
+
+function crearSolicitudesDemo() {
+  const demo = [
+    {
+      id: 'demo-1',
+      tipoServicio: 'Individual',
+      nombre: 'Jesús Romero',
+      fecha: '2026-09-22',
+      hora: '08:30',
+      direccion: 'Calle Morelos 24, Centro, Puebla, 72000, México',
+      ciudad: 'Puebla',
+      colonia: 'Centro',
+      cp: '72000',
+      calle: 'Morelos',
+      numero: '24',
+      telefono: '5551234567',
+      comentario: 'Cliente prioritario'
+    },
+    {
+      id: 'demo-2',
+      tipoServicio: 'Individual',
+      nombre: 'Erika López',
+      fecha: '2026-09-22',
+      hora: '08:45',
+      direccion: 'Avenida Juárez 118, San Jerónimo, Monterrey, 64000, México',
+      ciudad: 'Monterrey',
+      colonia: 'San Jerónimo',
+      cp: '64000',
+      calle: 'Juárez',
+      numero: '118',
+      telefono: '5557654321',
+      comentario: 'Ruta matutina'
+    },
+    {
+      id: 'demo-3',
+      tipoServicio: 'Masivo',
+      nombre: 'Grupo Barrio Norte',
+      fecha: '2026-09-22',
+      hora: '09:00',
+      direccion: 'Calle de la Reforma 55, Centro, Guadalajara, 44100, México',
+      ciudad: 'Guadalajara',
+      colonia: 'Centro',
+      cp: '44100',
+      calle: 'Reforma',
+      numero: '55',
+      telefono: '5551239898',
+      comentario: 'Carga masiva'
+    },
+    {
+      id: 'demo-4',
+      tipoServicio: 'Masivo',
+      nombre: 'Grupo Sol',
+      fecha: '2026-09-22',
+      hora: '09:00',
+      direccion: 'Calle Ámbar 30, Colonia del Sol, León, 37200, México',
+      ciudad: 'León',
+      colonia: 'Colonia del Sol',
+      cp: '37200',
+      calle: 'Ámbar',
+      numero: '30',
+      telefono: '5554441122',
+      comentario: 'Masivo'
+    }
+  ];
+
+  const actuales = obtenerSolicitudesGuardadas();
+  if (!actuales.length) {
+    guardarSolicitudes(demo);
+  }
+}
+
+function normalizarFechaHora(fecha, hora) {
+  return {
+    fechaTexto: String(fecha || '').trim() || 'Sin fecha',
+    horaTexto: String(hora || '').trim() || 'Sin hora'
+  };
+}
+
+function obtenerSolicitudesParaRutas() {
+  return obtenerSolicitudesGuardadas().filter(item => item && (item.direccion || item.calle || item.colonia));
+}
+
+function distanciaRuta(a, b) {
+  const aTexto = `${a.ciudad || ''} ${a.colonia || ''} ${a.cp || ''} ${a.calle || ''} ${a.numero || ''}`.toLowerCase();
+  const bTexto = `${b.ciudad || ''} ${b.colonia || ''} ${b.cp || ''} ${b.calle || ''} ${b.numero || ''}`.toLowerCase();
+  let score = 0;
+  if (a.ciudad && b.ciudad && a.ciudad === b.ciudad) score -= 10;
+  if (a.cp && b.cp && a.cp === b.cp) score -= 25;
+  if (a.colonia && b.colonia && a.colonia === b.colonia) score -= 35;
+  if (a.calle && b.calle && a.calle === b.calle) score -= 20;
+  return score + aTexto.localeCompare(bTexto, 'es', { sensitivity: 'base' });
+}
+
+function agruparSolicitudesPorRuta() {
+  const solicitudes = obtenerSolicitudesParaRutas();
+  const grupos = new Map();
+
+  solicitudes.forEach(solicitud => {
+    const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
+    const clave = `${fechaTexto}__${horaTexto}`;
+    if (!grupos.has(clave)) grupos.set(clave, []);
+    grupos.get(clave).push(solicitud);
+  });
+
+  return [...grupos.entries()].map(([clave, items]) => {
+    const [fechaTexto, horaTexto] = clave.split('__');
+    const rutas = [];
+    const ordenadas = [...items].sort((a, b) => distanciaRuta(a, b));
+    for (let indice = 0; indice < ordenadas.length; indice += 4) {
+      rutas.push(ordenadas.slice(indice, indice + 4));
+    }
+    return { clave, fecha: fechaTexto, hora: horaTexto, rutas };
+  }).sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
+}
+
+function renderSolicitudesAdmin() {
+  const solicitudes = obtenerSolicitudesParaRutas();
+  const individuales = solicitudes.filter(item => item.tipoServicio === 'Individual');
+  const masivas = solicitudes.filter(item => item.tipoServicio === 'Masivo');
+  contadorIndividuales.textContent = String(individuales.length);
+  contadorMasivas.textContent = String(masivas.length);
+
+  const filas = solicitudes.map(solicitud => {
+    const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
+    const nombre = solicitud.nombre || 'Cliente';
+    const direccion = solicitud.direccion || [solicitud.calle, solicitud.numero, solicitud.colonia, solicitud.ciudad, solicitud.cp].filter(Boolean).join(', ');
+    return `
+      <tr class="border-t border-slate-200">
+        <td class="px-3 py-2 font-semibold ${solicitud.tipoServicio === 'Masivo' ? 'text-cyan-700' : 'text-blue-700'}">${solicitud.tipoServicio}</td>
+        <td class="px-3 py-2">${nombre}</td>
+        <td class="px-3 py-2">${fechaTexto}</td>
+        <td class="px-3 py-2">${horaTexto}</td>
+        <td class="px-3 py-2">${direccion}</td>
+      </tr>
+    `;
+  }).join('');
+
+  tablaSolicitudesAdmin.innerHTML = filas || '<tr><td colspan="5" class="px-3 py-5 text-center text-slate-500">Sin solicitudes registradas.</td></tr>';
+
+  const grupos = agruparSolicitudesPorRuta();
+  contadorRutas.textContent = String(grupos.reduce((total, grupo) => total + grupo.rutas.length, 0));
+
+  gruposRutasAdmin.innerHTML = grupos.map(grupo => `
+    <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+      <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">${grupo.fecha} • ${grupo.hora}</p>
+      <div class="space-y-2">
+        ${grupo.rutas.map((ruta, index) => `
+          <div class="rounded-xl border border-slate-200 bg-white p-2">
+            <p class="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Ruta ${index + 1} (${ruta.length} personas)</p>
+            <ul class="space-y-1 text-sm text-slate-700">
+              ${ruta.map(item => `<li>• ${item.nombre || 'Cliente'} — ${item.direccion || 'Sin dirección'}</li>`).join('')}
+            </ul>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('') || '<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">No hay grupos de rutas todavía.</div>';
+}
+
+function abrirModalRutas() {
+  const grupos = agruparSolicitudesPorRuta();
+  if (!grupos.length) {
+    modalRutasBody.innerHTML = '<p class="text-slate-500">No hay solicitudes para generar rutas.</p>';
+    modalRutas.classList.remove('hidden');
+    modalRutas.classList.add('flex');
+    return;
+  }
+
+  modalRutasBody.innerHTML = grupos.map(grupo => `
+    <div class="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div class="mb-3 flex items-center justify-between">
+        <h4 class="text-lg font-bold text-slate-800">${grupo.fecha} • ${grupo.hora}</h4>
+        <span class="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">${grupo.rutas.length} rutas</span>
+      </div>
+      <div class="grid gap-3 md:grid-cols-2">
+        ${grupo.rutas.map((ruta, index) => `
+          <div class="rounded-2xl border border-slate-200 bg-white p-3">
+            <p class="mb-2 text-sm font-bold text-slate-700">Ruta ${index + 1} • ${ruta.length} pasajeros</p>
+            <ol class="space-y-2 text-sm text-slate-600">
+              ${ruta.map((item, pos) => `
+                <li class="rounded-lg bg-slate-50 p-2">
+                  <span class="font-semibold text-slate-700">${pos + 1}. ${item.nombre || 'Cliente'}</span><br>
+                  <span>${item.direccion || 'Sin dirección'}</span>
+                </li>
+              `).join('')}
+            </ol>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+
+  modalRutas.classList.remove('hidden');
+  modalRutas.classList.add('flex');
+}
+
+function cerrarModalRutas() {
+  modalRutas.classList.add('hidden');
+  modalRutas.classList.remove('flex');
+}
+
+function iniciarSesionAdmin() {
+  const usuario = adminUsuario.value.trim();
+  const password = adminPassword.value;
+
+  if (usuario === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+    adminLoginBox.classList.add('hidden');
+    adminDashboard.classList.remove('hidden');
+    adminPortal.classList.remove('hidden');
+    renderSolicitudesAdmin();
+    return;
+  }
+
+  alert('Credenciales incorrectas. Usa admin / admin123');
+}
+
+function cerrarSesionAdmin() {
+  adminUsuario.value = '';
+  adminPassword.value = '';
+  adminLoginBox.classList.remove('hidden');
+  adminDashboard.classList.add('hidden');
+}
+
+function parsearFilasDelimitadas(texto) {
+  const filas = [];
+  let filaActual = [];
+  let valorActual = '';
+  let dentroDeComillas = false;
+
+  const cerrarFila = () => {
+    filaActual.push(valorActual.trim());
+    if (filaActual.some(valor => valor !== '')) filas.push(filaActual);
+    filaActual = [];
+    valorActual = '';
+  };
+
+  for (let indice = 0; indice < texto.length; indice += 1) {
+    const caracter = texto[indice];
+    const siguiente = texto[indice + 1];
+
+    if (caracter === '"') {
+      if (dentroDeComillas && siguiente === '"') {
+        valorActual += '"';
+        indice += 1;
+      } else {
+        dentroDeComillas = !dentroDeComillas;
+      }
+      continue;
+    }
+
+    if ((caracter === '\t' || caracter === ',') && !dentroDeComillas) {
+      filaActual.push(valorActual.trim());
+      valorActual = '';
+      continue;
+    }
+
+    if ((caracter === '\n' || caracter === '\r') && !dentroDeComillas) {
+      if (caracter === '\r' && siguiente === '\n') {
+        indice += 1;
+      }
+      cerrarFila();
+      continue;
+    }
+
+    valorActual += caracter;
+  }
+
+  if (valorActual.length || filaActual.length) {
+    cerrarFila();
+  }
+
+  return filas.filter(fila => fila.some(valor => valor !== '')).filter(fila => {
+    const encabezados = ['no. empleado', 'nombre del empleado', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'número', 'teléfono', 'telefono', 'comentario'];
+    const normalizada = fila.map(valor => String(valor).trim().toLowerCase());
+    const coincidencias = normalizada.filter((valor, indice) => indice < encabezados.length && valor === encabezados[indice]).length;
+    return coincidencias < 4;
+  });
+}
+
+function limpiarFilaPegada(fila) {
+  const columnas = Array.from({ length: columnasMasivas.length }, (_, index) => String(fila[index] ?? '').trim());
+  return columnas;
+}
+
+function parsearValoresDeFilaPegada(fila) {
+  const [numEmp = '', nombreEmp = '', localidad = '', viaje = '', fecha = '', horarios = '', cp = '', ciudad = '', colonia = '', calle = '', numero = '', telefono = '', comentario = ''] = limpiarFilaPegada(fila);
+  const horaEntrada = horarios.includes('/') ? horarios.split('/')[0].trim() : horarios.trim();
+  const horaSalida = horarios.includes('/') ? horarios.split('/')[1]?.trim() || '' : '';
+
+  return {
+    numEmp,
+    nombreEmp,
+    localidad,
+    viaje,
+    fechaEntrada: fecha,
+    fechaSalida: fecha,
+    horaEntrada,
+    horaSalida,
+    cp,
+    ciudad,
+    colonia,
+    calle,
+    numero,
+    telefono,
+    comentario
+  };
+}
+
+async function pegarTablaMasiva() {
+  if (!navigator.clipboard || !navigator.clipboard.readText) {
+    alert('Este navegador no permite leer el portapapeles desde la web.');
     return;
   }
 
   try {
-    if (navigator.clipboard && window.isSecureContext && window.ClipboardItem) {
-      const htmlBlob = new Blob([htmlTablaMasiva()], { type: 'text/html' });
-      const textBlob = new Blob([texto], { type: 'text/plain' });
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
-      ]);
-    } else {
-      const helper = document.createElement('textarea');
-      helper.value = texto;
-      helper.setAttribute('readonly', '');
-      helper.style.position = 'fixed';
-      helper.style.left = '-9999px';
-      document.body.appendChild(helper);
-      helper.select();
-      document.execCommand('copy');
-      document.body.removeChild(helper);
+    const texto = await navigator.clipboard.readText();
+    const filas = parsearFilasDelimitadas(texto);
+
+    if (!filas.length) {
+      alert('El portapapeles no contiene una tabla válida para pegar.');
+      return;
     }
 
-    alert('Tabla copiada. En Excel probablemente se pegará en columnas.');
+    [...cuerpoTablaMasivo.rows].forEach(fila => fila.remove());
+
+    filas.forEach(fila => {
+      const valores = parsearValoresDeFilaPegada(fila);
+      crearFilaMasiva(valores);
+    });
+
+    if (!cuerpoTablaMasivo.rows.length) {
+      crearFilaMasiva();
+    }
+
+    alert('Tabla pegada correctamente.');
   } catch (error) {
-    console.error('No se pudo copiar la tabla:', error);
-    alert('El navegador bloqueó el portapapeles. Usa el botón “Descargar CSV” para abrirlo directamente en Excel.');
+    console.error('No se pudo pegar la tabla:', error);
+    alert('No se pudo acceder al portapapeles. Copia la tabla desde Excel y vuelve a intentarlo.');
   }
 }
 
@@ -439,8 +812,20 @@ cuerpoTablaMasivo.addEventListener('copy', event => {
 });
 
 document.getElementById('btnAgregarFila').addEventListener('click', () => crearFilaMasiva());
-document.getElementById('btnCopiarTablaMasiva').addEventListener('click', copiarTablaMasiva);
+document.getElementById('btnCopiarTablaMasiva').addEventListener('click', pegarTablaMasiva);
 document.getElementById('btnDescargarCsvMasiva').addEventListener('click', descargarCsvMasiva);
+document.getElementById('btnAbrirAdmin').addEventListener('click', () => {
+  adminPortal.classList.remove('hidden');
+  adminLoginBox.classList.remove('hidden');
+  adminDashboard.classList.add('hidden');
+});
+document.getElementById('btnLoginAdmin').addEventListener('click', iniciarSesionAdmin);
+document.getElementById('btnCerrarSesionAdmin').addEventListener('click', cerrarSesionAdmin);
+document.getElementById('btnAbrirRutas').addEventListener('click', abrirModalRutas);
+document.getElementById('btnCerrarModalRutas').addEventListener('click', cerrarModalRutas);
+modalRutas.addEventListener('click', (event) => {
+  if (event.target === modalRutas) cerrarModalRutas();
+});
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
@@ -453,6 +838,10 @@ form.addEventListener('submit', async event => {
   try {
     const response = await fetch('/api/taxi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     if (!response.ok) throw new Error(`Power Automate respondió ${response.status}`);
+    registrarSolicitud(payload);
+    if (adminDashboard && !adminDashboard.classList.contains('hidden')) {
+      renderSolicitudesAdmin();
+    }
     btnEnviar.textContent = 'Solicitud enviada';
   } catch (error) {
     btnEnviar.disabled = false;
@@ -461,5 +850,7 @@ form.addEventListener('submit', async event => {
   }
 });
 
+crearSolicitudesDemo();
 crearFilaMasiva();
 cargarCp().catch(error => console.error(error));
+renderSolicitudesAdmin();
