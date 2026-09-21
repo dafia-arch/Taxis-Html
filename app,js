@@ -193,6 +193,34 @@ function serializarTablaMasiva() {
   }).join('\n');
 }
 
+function escaparHtml(valor) {
+  return String(valor ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function htmlTablaMasiva() {
+  const encabezados = ['No. Empleado', 'Nombre del empleado', 'Localidad', 'Viaje', 'Fecha', 'Horarios', 'CP', 'Ciudad', 'Colonia', 'Calle', 'Número', 'Teléfono', 'Comentario'];
+  const filas = [...cuerpoTablaMasivo.rows].map(fila => {
+    const celdas = Array.from(fila.cells).slice(0, -1);
+    return '<tr>' + celdas.map(celda => `<td>${escaparHtml(textoCeldaMasiva(celda))}</td>`).join('') + '</tr>';
+  }).join('');
+
+  return '<table><thead><tr>' + encabezados.map(header => `<th>${escaparHtml(header)}</th>`).join('') + '</tr></thead><tbody>' + filas + '</tbody></table>';
+}
+
+function csvMasiva() {
+  const encabezados = ['No. Empleado', 'Nombre del empleado', 'Localidad', 'Viaje', 'Fecha', 'Horarios', 'CP', 'Ciudad', 'Colonia', 'Calle', 'Número', 'Teléfono', 'Comentario'];
+  const filas = [...cuerpoTablaMasivo.rows].map(fila => {
+    const celdas = Array.from(fila.cells).slice(0, -1);
+    return celdas.map(celda => `"${textoCeldaMasiva(celda).replace(/"/g, '""')}"`).join(',');
+  });
+  return [encabezados.map(h => `"${h}"`).join(','), ...filas].join('\n');
+}
+
 async function copiarTablaMasiva() {
   const texto = serializarTablaMasiva();
   if (!texto.trim()) {
@@ -201,8 +229,12 @@ async function copiarTablaMasiva() {
   }
 
   try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(texto);
+    if (navigator.clipboard && window.isSecureContext && window.ClipboardItem) {
+      const htmlBlob = new Blob([htmlTablaMasiva()], { type: 'text/html' });
+      const textBlob = new Blob([texto], { type: 'text/plain' });
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'text/html': htmlBlob, 'text/plain': textBlob })
+      ]);
     } else {
       const helper = document.createElement('textarea');
       helper.value = texto;
@@ -214,11 +246,31 @@ async function copiarTablaMasiva() {
       document.execCommand('copy');
       document.body.removeChild(helper);
     }
-    alert('Tabla copiada en formato tabular. Pégala en Excel y se separará por columnas.');
+
+    alert('Tabla copiada. En Excel probablemente se pegará en columnas.');
   } catch (error) {
     console.error('No se pudo copiar la tabla:', error);
-    alert('No se pudo copiar la tabla. Intenta usar el botón de copiar nuevamente.');
+    alert('El navegador bloqueó el portapapeles. Usa el botón “Descargar CSV” para abrirlo directamente en Excel.');
   }
+}
+
+function descargarCsvMasiva() {
+  const contenido = csvMasiva();
+  if (!contenido.trim()) {
+    alert('No hay filas para exportar.');
+    return;
+  }
+
+  const blob = new Blob([contenido], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'tabla-masiva.csv';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  alert('Se descargó el CSV. Ábrelo en Excel para ver los datos en columnas.');
 }
 
 function crearFilaMasiva(valores = {}) {
@@ -388,6 +440,7 @@ cuerpoTablaMasivo.addEventListener('copy', event => {
 
 document.getElementById('btnAgregarFila').addEventListener('click', () => crearFilaMasiva());
 document.getElementById('btnCopiarTablaMasiva').addEventListener('click', copiarTablaMasiva);
+document.getElementById('btnDescargarCsvMasiva').addEventListener('click', descargarCsvMasiva);
 
 form.addEventListener('submit', async event => {
   event.preventDefault();
