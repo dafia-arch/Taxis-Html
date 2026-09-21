@@ -19,6 +19,9 @@ const direccionMasiva = document.getElementById('direccionMasiva');
 const columnasMasivas = ['numEmp', 'nombreEmp', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
 const ADMIN_CREDENTIALS = { username: 'admin', password: 'admin123' };
 const STORAGE_KEY = 'taxiRequestsLocalTest';
+const MAX_ROUTE_DISTANCE_KM = 10;
+const MAX_ROUTE_SIZE = 4;
+const TIME_WINDOW_MINUTES = 30;
 const adminPortal = document.getElementById('adminPortal');
 const adminLoginBox = document.getElementById('adminLoginBox');
 const adminDashboard = document.getElementById('adminDashboard');
@@ -364,6 +367,12 @@ function normalizarFechaHora(fecha, hora) {
   };
 }
 
+function minutosDesdeMedianoche(hora) {
+  const coincidencia = String(hora || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!coincidencia) return null;
+  return Number(coincidencia[1]) * 60 + Number(coincidencia[2]);
+}
+
 function obtenerSolicitudesParaRutas() {
   return obtenerSolicitudesGuardadas().filter(item => item && (item.direccion || item.calle || item.colonia));
 }
@@ -397,6 +406,24 @@ function esperar(milisegundos) {
   return new Promise(resolve => setTimeout(resolve, milisegundos));
 }
 
+async function consultarGeocodificacion(consulta) {
+  let response = await fetch(`/api/geocode?address=${encodeURIComponent(consulta)}`);
+
+  if (response.status === 404) {
+    response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&q=${encodeURIComponent(consulta)}`);
+  }
+
+  if (!response.ok) throw new Error(`Geocodificación respondió ${response.status}`);
+  const datos = await response.json();
+  if (Array.isArray(datos)) {
+    const resultado = datos[0];
+    return resultado
+      ? { lat: Number(resultado.lat), lon: Number(resultado.lon), displayName: resultado.display_name }
+      : { lat: null, lon: null };
+  }
+  return datos;
+}
+
 async function geocodificarSolicitud(solicitud, cache) {
   const direccion = direccionDeSolicitud(solicitud);
   const cacheKey = direccion.toLowerCase();
@@ -406,13 +433,21 @@ async function geocodificarSolicitud(solicitud, cache) {
   }
 
   try {
-    const response = await fetch(`/api/geocode?address=${encodeURIComponent(direccion)}`);
-    if (!response.ok) throw new Error(`Geocodificación respondió ${response.status}`);
-    const resultado = await response.json();
-    if (Number.isFinite(resultado.lat) && Number.isFinite(resultado.lon)) {
-      const coordenadas = { lat: resultado.lat, lon: resultado.lon };
-      cache[cacheKey] = coordenadas;
-      Object.assign(solicitud, coordenadas);
+    const consultas = [
+      direccion,
+      [solicitud.colonia, solicitud.ciudad, solicitud.cp, 'México'].filter(Boolean).join(', '),
+      [solicitud.ciudad, solicitud.cp, 'México'].filter(Boolean).join(', ')
+    ].filter((consulta, indice, lista) => consulta && lista.indexOf(consulta) === indice);
+
+    for (const [indice, consulta] of consultas.entries()) {
+      const resultado = await consultarGeocodificacion(consulta);
+      if (Number.isFinite(resultado.lat) && Number.isFinite(resultado.lon)) {
+        const coordenadas = { lat: resultado.lat, lon: resultado.lon };
+        cache[cacheKey] = coordenadas;
+        Object.assign(solicitud, coordenadas);
+        break;
+      }
+      if (indice < consultas.length - 1) await esperar(1000);
     }
   } catch (error) {
     console.warn('No se pudo geocodificar:', direccion, error.message);
@@ -450,27 +485,49 @@ function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) 
 
   solicitudes.forEach(solicitud => {
     const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
-    const clave = `${fechaTexto}__${horaTexto}`;
-    if (!grupos.has(clave)) grupos.set(clave, []);
-    grupos.get(clave).push(solicitud);
+    const minutos = minutosDesdeMedianoche(horaTexto);
+    const grupoExistente = [...grupos.values()].find(grupo => (
+      grupo.fecha === fechaTexto
+      && minutos !== null
+      && grupo.minutos !== null
+      && Math.abs(grupo.minutos - minutos) <= TIME_WINDOW_MINUTES
+    ));
+
+    if (grupoExistente) {
+      grupoExistente.items.push(solicitud);
+      grupoExistente.minutos = Math.round((grupoExistente.minutos + minutos) / 2);
+      return;
+    }
+
+    grupos.set(`${fechaTexto}__${horaTexto}__${grupos.size}`, {
+      fecha: fechaTexto,
+      hora: horaTexto,
+      minutos,
+      items: [solicitud]
+    });
   });
 
-  return [...grupos.entries()].map(([clave, items]) => {
-    const [fechaTexto, horaTexto] = clave.split('__');
+  return [...grupos.entries()].map(([clave, grupo]) => {
+    const { fecha: fechaTexto, hora: horaTexto, items } = grupo;
     const rutas = [];
     const pendientes = [...items];
     while (pendientes.length) {
       const referencia = pendientes.shift();
       const ruta = [referencia];
-      const candidatos = pendientes
-        .map((item, indice) => ({ item, indice, distancia: distanciaKm(referencia, item) }))
-        .filter(candidato => candidato.distancia <= 10)
-        .sort((a, b) => a.distancia - b.distancia);
+      while (ruta.length < MAX_ROUTE_SIZE && pendientes.length) {
+        const candidatos = pendientes.map((item, indice) => ({
+          item,
+          indice,
+          distanciaMaxima: Math.max(...ruta.map(parte => distanciaKm(parte, item)))
+        }))
+          .filter(candidato => candidato.distanciaMaxima <= MAX_ROUTE_DISTANCE_KM)
+          .sort((a, b) => a.distanciaMaxima - b.distanciaMaxima);
 
-      candidatos.slice(0, 3).reverse().forEach(candidato => {
-        ruta.push(candidato.item);
-        pendientes.splice(candidato.indice, 1);
-      });
+        const siguiente = candidatos[0];
+        if (!siguiente) break;
+        ruta.push(siguiente.item);
+        pendientes.splice(siguiente.indice, 1);
+      }
       rutas.push(ruta);
     }
     return { clave, fecha: fechaTexto, hora: horaTexto, rutas };
