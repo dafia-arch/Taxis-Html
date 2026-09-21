@@ -464,7 +464,7 @@ function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) 
       const ruta = [referencia];
       const candidatos = pendientes
         .map((item, indice) => ({ item, indice, distancia: distanciaKm(referencia, item) }))
-        .filter(candidato => candidato.distancia <= 5)
+        .filter(candidato => candidato.distancia <= 10)
         .sort((a, b) => a.distancia - b.distancia);
 
       candidatos.slice(0, 3).reverse().forEach(candidato => {
