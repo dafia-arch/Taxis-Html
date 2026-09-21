@@ -42,6 +42,29 @@ function serveStatic(request, response) {
 const server = http.createServer((request, response) => {
   const requestPath = new URL(request.url, `http://${request.headers.host || 'localhost'}`).pathname;
 
+  if (request.method === 'GET' && requestPath === '/api/geocode') {
+    const address = new URL(request.url, `http://${request.headers.host || 'localhost'}`).searchParams.get('address');
+    if (!address || address.length > 300) {
+      sendJson(response, 400, { error: 'La dirección es obligatoria y debe tener menos de 300 caracteres.' });
+      return;
+    }
+
+    fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&q=${encodeURIComponent(address)}`, {
+      headers: {
+        'Accept': 'application/json',
+        'User-Agent': 'Taxis-Html/1.0 (prueba de agrupacion de rutas)'
+      }
+    }).then(async geocodeResponse => {
+      if (!geocodeResponse.ok) throw new Error(`Nominatim respondió ${geocodeResponse.status}`);
+      const resultados = await geocodeResponse.json();
+      const resultado = resultados[0];
+      sendJson(response, 200, resultado ? { lat: Number(resultado.lat), lon: Number(resultado.lon), displayName: resultado.display_name } : { lat: null, lon: null });
+    }).catch(error => {
+      sendJson(response, 502, { error: 'No se pudo geocodificar la dirección.', detail: error.message });
+    });
+    return;
+  }
+
   // Endpoint unificado para procesar la solicitud de taxi
   if (request.method === 'POST' && requestPath === '/api/taxi') {
     let body = '';

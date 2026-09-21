@@ -18,7 +18,7 @@ const linkGoogleMapsMasivo = document.getElementById('linkGoogleMapsMasivo');
 const direccionMasiva = document.getElementById('direccionMasiva');
 const columnasMasivas = ['numEmp', 'nombreEmp', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
 const ADMIN_CREDENTIALS = { username: 'admin', password: 'admin123' };
-const STORAGE_KEY = 'taxiRequests';
+const STORAGE_KEY = 'taxiRequestsLocalTest';
 const adminPortal = document.getElementById('adminPortal');
 const adminLoginBox = document.getElementById('adminLoginBox');
 const adminDashboard = document.getElementById('adminDashboard');
@@ -309,12 +309,12 @@ function crearSolicitudesDemo() {
       tipoServicio: 'Individual',
       nombre: 'Erika López',
       fecha: '2026-09-22',
-      hora: '08:45',
-      direccion: 'Avenida Juárez 118, San Jerónimo, Monterrey, 64000, México',
-      ciudad: 'Monterrey',
-      colonia: 'San Jerónimo',
-      cp: '64000',
-      calle: 'Juárez',
+      hora: '08:30',
+      direccion: 'Avenida Reforma 118, La Paz, Puebla, 72160, México',
+      ciudad: 'Puebla',
+      colonia: 'La Paz',
+      cp: '72160',
+      calle: 'Reforma',
       numero: '118',
       telefono: '5557654321',
       comentario: 'Ruta matutina'
@@ -325,11 +325,11 @@ function crearSolicitudesDemo() {
       nombre: 'Grupo Barrio Norte',
       fecha: '2026-09-22',
       hora: '09:00',
-      direccion: 'Calle de la Reforma 55, Centro, Guadalajara, 44100, México',
-      ciudad: 'Guadalajara',
-      colonia: 'Centro',
-      cp: '44100',
-      calle: 'Reforma',
+      direccion: 'Calle 25 Sur 55, La Paz, Puebla, 72160, México',
+      ciudad: 'Puebla',
+      colonia: 'La Paz',
+      cp: '72160',
+      calle: '25 Sur',
       numero: '55',
       telefono: '5551239898',
       comentario: 'Carga masiva'
@@ -340,11 +340,11 @@ function crearSolicitudesDemo() {
       nombre: 'Grupo Sol',
       fecha: '2026-09-22',
       hora: '09:00',
-      direccion: 'Calle Ámbar 30, Colonia del Sol, León, 37200, México',
-      ciudad: 'León',
-      colonia: 'Colonia del Sol',
-      cp: '37200',
-      calle: 'Ámbar',
+      direccion: 'Avenida Teziutlán 30, La Paz, Puebla, 72160, México',
+      ciudad: 'Puebla',
+      colonia: 'La Paz',
+      cp: '72160',
+      calle: 'Teziutlán',
       numero: '30',
       telefono: '5554441122',
       comentario: 'Masivo'
@@ -368,19 +368,84 @@ function obtenerSolicitudesParaRutas() {
   return obtenerSolicitudesGuardadas().filter(item => item && (item.direccion || item.calle || item.colonia));
 }
 
-function distanciaRuta(a, b) {
-  const aTexto = `${a.ciudad || ''} ${a.colonia || ''} ${a.cp || ''} ${a.calle || ''} ${a.numero || ''}`.toLowerCase();
-  const bTexto = `${b.ciudad || ''} ${b.colonia || ''} ${b.cp || ''} ${b.calle || ''} ${b.numero || ''}`.toLowerCase();
-  let score = 0;
-  if (a.ciudad && b.ciudad && a.ciudad === b.ciudad) score -= 10;
-  if (a.cp && b.cp && a.cp === b.cp) score -= 25;
-  if (a.colonia && b.colonia && a.colonia === b.colonia) score -= 35;
-  if (a.calle && b.calle && a.calle === b.calle) score -= 20;
-  return score + aTexto.localeCompare(bTexto, 'es', { sensitivity: 'base' });
+function direccionDeSolicitud(solicitud) {
+  return solicitud.direccion || [solicitud.calle, solicitud.numero, solicitud.colonia, solicitud.ciudad, solicitud.cp, 'México']
+    .filter(Boolean).join(', ');
 }
 
-function agruparSolicitudesPorRuta() {
-  const solicitudes = obtenerSolicitudesParaRutas();
+function distanciaKm(a, b) {
+  if (!Number.isFinite(a.lat) || !Number.isFinite(a.lon) || !Number.isFinite(b.lat) || !Number.isFinite(b.lon)) return Infinity;
+  const radioTierraKm = 6371;
+  const aLat = a.lat * Math.PI / 180;
+  const bLat = b.lat * Math.PI / 180;
+  const diferenciaLat = (b.lat - a.lat) * Math.PI / 180;
+  const diferenciaLon = (b.lon - a.lon) * Math.PI / 180;
+  const haversine = Math.sin(diferenciaLat / 2) ** 2
+    + Math.cos(aLat) * Math.cos(bLat) * Math.sin(diferenciaLon / 2) ** 2;
+  return 2 * radioTierraKm * Math.asin(Math.sqrt(haversine));
+}
+
+function obtenerCacheGeocodificacion() {
+  try {
+    return JSON.parse(localStorage.getItem('taxiGeocodeCache') || '{}');
+  } catch (error) {
+    return {};
+  }
+}
+
+function esperar(milisegundos) {
+  return new Promise(resolve => setTimeout(resolve, milisegundos));
+}
+
+async function geocodificarSolicitud(solicitud, cache) {
+  const direccion = direccionDeSolicitud(solicitud);
+  const cacheKey = direccion.toLowerCase();
+  if (cache[cacheKey]) {
+    Object.assign(solicitud, cache[cacheKey]);
+    return solicitud;
+  }
+
+  try {
+    const response = await fetch(`/api/geocode?address=${encodeURIComponent(direccion)}`);
+    if (!response.ok) throw new Error(`Geocodificación respondió ${response.status}`);
+    const resultado = await response.json();
+    if (Number.isFinite(resultado.lat) && Number.isFinite(resultado.lon)) {
+      const coordenadas = { lat: resultado.lat, lon: resultado.lon };
+      cache[cacheKey] = coordenadas;
+      Object.assign(solicitud, coordenadas);
+    }
+  } catch (error) {
+    console.warn('No se pudo geocodificar:', direccion, error.message);
+  }
+
+  return solicitud;
+}
+
+async function geocodificarSolicitudes(solicitudes) {
+  const cache = obtenerCacheGeocodificacion();
+  let hayCambios = false;
+  for (const solicitud of solicitudes) {
+    const teniaCoordenadas = Number.isFinite(solicitud.lat) && Number.isFinite(solicitud.lon);
+    const direccion = direccionDeSolicitud(solicitud);
+    const cacheKey = direccion.toLowerCase();
+    const estabaEnCache = Boolean(cache[cacheKey]);
+    await geocodificarSolicitud(solicitud, cache);
+    if (!teniaCoordenadas && Number.isFinite(solicitud.lat) && Number.isFinite(solicitud.lon)) hayCambios = true;
+    if (!teniaCoordenadas && !estabaEnCache) await esperar(1000);
+  }
+  localStorage.setItem('taxiGeocodeCache', JSON.stringify(cache));
+  if (hayCambios) {
+    const coordenadasPorId = new Map(solicitudes.map(solicitud => [solicitud.id, { lat: solicitud.lat, lon: solicitud.lon }]));
+    const solicitudesGuardadas = obtenerSolicitudesGuardadas().map(solicitud => ({
+      ...solicitud,
+      ...(coordenadasPorId.get(solicitud.id) || {})
+    }));
+    guardarSolicitudes(solicitudesGuardadas);
+  }
+  return solicitudes;
+}
+
+function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) {
   const grupos = new Map();
 
   solicitudes.forEach(solicitud => {
@@ -393,16 +458,28 @@ function agruparSolicitudesPorRuta() {
   return [...grupos.entries()].map(([clave, items]) => {
     const [fechaTexto, horaTexto] = clave.split('__');
     const rutas = [];
-    const ordenadas = [...items].sort((a, b) => distanciaRuta(a, b));
-    for (let indice = 0; indice < ordenadas.length; indice += 4) {
-      rutas.push(ordenadas.slice(indice, indice + 4));
+    const pendientes = [...items];
+    while (pendientes.length) {
+      const referencia = pendientes.shift();
+      const ruta = [referencia];
+      const candidatos = pendientes
+        .map((item, indice) => ({ item, indice, distancia: distanciaKm(referencia, item) }))
+        .filter(candidato => candidato.distancia <= 5)
+        .sort((a, b) => a.distancia - b.distancia);
+
+      candidatos.slice(0, 3).reverse().forEach(candidato => {
+        ruta.push(candidato.item);
+        pendientes.splice(candidato.indice, 1);
+      });
+      rutas.push(ruta);
     }
     return { clave, fecha: fechaTexto, hora: horaTexto, rutas };
   }).sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
 }
 
-function renderSolicitudesAdmin() {
+async function renderSolicitudesAdmin() {
   const solicitudes = obtenerSolicitudesParaRutas();
+  await geocodificarSolicitudes(solicitudes);
   const individuales = solicitudes.filter(item => item.tipoServicio === 'Individual');
   const masivas = solicitudes.filter(item => item.tipoServicio === 'Masivo');
   contadorIndividuales.textContent = String(individuales.length);
@@ -425,7 +502,7 @@ function renderSolicitudesAdmin() {
 
   tablaSolicitudesAdmin.innerHTML = filas || '<tr><td colspan="5" class="px-3 py-5 text-center text-slate-500">Sin solicitudes registradas.</td></tr>';
 
-  const grupos = agruparSolicitudesPorRuta();
+  const grupos = agruparSolicitudesPorRuta(solicitudes);
   contadorRutas.textContent = String(grupos.reduce((total, grupo) => total + grupo.rutas.length, 0));
 
   gruposRutasAdmin.innerHTML = grupos.map(grupo => `
@@ -445,8 +522,10 @@ function renderSolicitudesAdmin() {
   `).join('') || '<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">No hay grupos de rutas todavía.</div>';
 }
 
-function abrirModalRutas() {
-  const grupos = agruparSolicitudesPorRuta();
+async function abrirModalRutas() {
+  const solicitudes = obtenerSolicitudesParaRutas();
+  await geocodificarSolicitudes(solicitudes);
+  const grupos = agruparSolicitudesPorRuta(solicitudes);
   if (!grupos.length) {
     modalRutasBody.innerHTML = '<p class="text-slate-500">No hay solicitudes para generar rutas.</p>';
     modalRutas.classList.remove('hidden');
@@ -827,27 +906,18 @@ modalRutas.addEventListener('click', (event) => {
   if (event.target === modalRutas) cerrarModalRutas();
 });
 
-form.addEventListener('submit', async event => {
+form.addEventListener('submit', event => {
   event.preventDefault();
   const esMasivo = servicioSelect.value === 'Masivo';
   const payload = esMasivo
     ? { tipoServicio: 'Masivo', solicitudes: [...cuerpoTablaMasivo.rows].map(fila => ({ ...valoresDeFila(fila), ligaGoogleMaps: fila.dataset.urlMapa || enlacesDeDireccion([valoresDeFila(fila).calle, valoresDeFila(fila).numero, valoresDeFila(fila).colonia, valoresDeFila(fila).ciudad, valoresDeFila(fila).cp, 'México'].filter(Boolean).join(', ')).googleMaps })) }
     : { tipoServicio: 'Individual', ligaGoogleMaps: btnEnviar.dataset.urlMapa || '', datos: valoresIndividuales() };
-  btnEnviar.disabled = true;
-  btnEnviar.textContent = 'Enviando...';
-  try {
-    const response = await fetch('/api/taxi', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-    if (!response.ok) throw new Error(`Power Automate respondió ${response.status}`);
-    registrarSolicitud(payload);
-    if (adminDashboard && !adminDashboard.classList.contains('hidden')) {
-      renderSolicitudesAdmin();
-    }
-    btnEnviar.textContent = 'Solicitud enviada';
-  } catch (error) {
-    btnEnviar.disabled = false;
-    btnEnviar.textContent = 'Reintentar envío';
-    alert(error.message);
+  registrarSolicitud(payload);
+  if (adminDashboard && !adminDashboard.classList.contains('hidden')) {
+    renderSolicitudesAdmin();
   }
+  btnEnviar.textContent = 'Solicitud guardada para pruebas';
+  btnEnviar.disabled = true;
 });
 
 crearSolicitudesDemo();
