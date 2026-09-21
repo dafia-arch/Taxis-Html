@@ -407,21 +407,10 @@ function esperar(milisegundos) {
 }
 
 async function consultarGeocodificacion(consulta) {
-  let response = await fetch(`/api/geocode?address=${encodeURIComponent(consulta)}`);
-
-  if (response.status === 404) {
-    response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&q=${encodeURIComponent(consulta)}`);
-  }
-
-  if (!response.ok) throw new Error(`Geocodificación respondió ${response.status}`);
-  const datos = await response.json();
-  if (Array.isArray(datos)) {
-    const resultado = datos[0];
-    return resultado
-      ? { lat: Number(resultado.lat), lon: Number(resultado.lon), displayName: resultado.display_name }
-      : { lat: null, lon: null };
-  }
-  return datos;
+  const direccionCodificada = encodeURIComponent(consulta);
+  const response = await fetch(`/api/geocode?address=${direccionCodificada}`);
+  if (!response.ok) throw new Error(`Google Maps respondió ${response.status}`);
+  return response.json();
 }
 
 async function geocodificarSolicitud(solicitud, cache) {
@@ -980,4 +969,3 @@ form.addEventListener('submit', event => {
 crearSolicitudesDemo();
 crearFilaMasiva();
 cargarCp().catch(error => console.error(error));
-renderSolicitudesAdmin();

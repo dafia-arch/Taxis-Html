@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 
 const PORT = process.env.PORT || 4173;
+const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 const root = __dirname;
 
 const mimeTypes = {
@@ -46,19 +47,25 @@ const server = http.createServer((request, response) => {
       sendJson(response, 400, { error: 'La dirección es obligatoria y debe tener menos de 300 caracteres.' });
       return;
     }
+    if (!GOOGLE_MAPS_API_KEY) {
+      sendJson(response, 503, { error: 'Falta configurar GOOGLE_MAPS_API_KEY en el servidor.' });
+      return;
+    }
 
-    fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=mx&q=${encodeURIComponent(address)}`, {
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Taxis-Html/1.0 (prueba de agrupacion de rutas)'
-      }
-    }).then(async geocodeResponse => {
-      if (!geocodeResponse.ok) throw new Error(`Nominatim respondió ${geocodeResponse.status}`);
-      const resultados = await geocodeResponse.json();
-      const resultado = resultados[0];
-      sendJson(response, 200, resultado ? { lat: Number(resultado.lat), lon: Number(resultado.lon), displayName: resultado.display_name } : { lat: null, lon: null });
+    fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&components=country:MX&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`)
+      .then(async geocodeResponse => {
+        if (!geocodeResponse.ok) throw new Error(`Google Maps respondió ${geocodeResponse.status}`);
+        const resultado = await geocodeResponse.json();
+        if (resultado.status !== 'OK') {
+          sendJson(response, 200, { lat: null, lon: null, status: resultado.status });
+          return;
+        }
+        const ubicacion = resultado.results[0]?.geometry?.location;
+        sendJson(response, 200, ubicacion
+          ? { lat: Number(ubicacion.lat), lon: Number(ubicacion.lng), displayName: resultado.results[0].formatted_address }
+          : { lat: null, lon: null });
     }).catch(error => {
-      sendJson(response, 502, { error: 'No se pudo geocodificar la dirección.', detail: error.message });
+      sendJson(response, 502, { error: 'No se pudo geocodificar la dirección con Google Maps.', detail: error.message });
     });
     return;
   }
