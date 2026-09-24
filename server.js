@@ -1,6 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const { cotizarViaje } = require('./inegi-ruteo-taxi');
 
 const PORT = process.env.PORT || 4173;
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
@@ -18,6 +19,27 @@ const mimeTypes = {
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(body));
+}
+
+function leerJson(request) {
+  return new Promise((resolve, reject) => {
+    let contenido = '';
+    request.on('data', fragmento => {
+      contenido += fragmento;
+      if (contenido.length > 100000) {
+        reject(new Error('El cuerpo de la solicitud es demasiado grande.'));
+        request.destroy();
+      }
+    });
+    request.on('end', () => {
+      try {
+        resolve(JSON.parse(contenido || '{}'));
+      } catch {
+        reject(new Error('El cuerpo debe ser JSON válido.'));
+      }
+    });
+    request.on('error', reject);
+  });
 }
 
 function serveStatic(request, response) {
@@ -67,6 +89,29 @@ const server = http.createServer((request, response) => {
     }).catch(error => {
       sendJson(response, 502, { error: 'No se pudo geocodificar la dirección con Google Maps.', detail: error.message });
     });
+    return;
+  }
+
+  if (request.method === 'POST' && requestPath === '/api/viaje/cotizar') {
+    leerJson(request)
+      .then(async body => {
+        if (!body.origen || !body.destino) {
+          sendJson(response, 400, { error: 'Debes enviar origen y destino.' });
+          return;
+        }
+
+        const cotizacion = await cotizarViaje(body.origen, body.destino, body.tarifaConfig);
+        sendJson(response, 200, cotizacion);
+      })
+      .catch(error => {
+        const faltaToken = error.message.includes('INEGI_TOKEN');
+        const esSolicitudInvalida = error.message.includes('debe incluir')
+          || error.message.includes('Tipo de ruta no válido')
+          || error.message.includes('JSON válido')
+          || error.message.includes('demasiado grande');
+        const statusCode = faltaToken ? 503 : esSolicitudInvalida ? 400 : 502;
+        sendJson(response, statusCode, { error: error.message });
+      });
     return;
   }
 
