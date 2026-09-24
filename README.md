@@ -1,12 +1,11 @@
 # Taxis-Html
 
-## Cotización de rutas con INEGI
+## Cotización de rutas con LocationIQ
 
-El servidor expone `POST /api/viaje/cotizar` y `POST /api/viaje/distancia`, y conserva el token de INEGI fuera del navegador.
-Configura ambos tokens como variables de entorno antes de iniciar la aplicación:
+El servidor expone `POST /api/viaje/cotizar` y `POST /api/viaje/distancia`, y conserva el token de LocationIQ fuera del navegador.
+Configura el token de LocationIQ como variable de entorno antes de iniciar la aplicación:
 
 ```bash
-export INEGI_TOKEN="tu-token-de-INEGI"
 export LOCATIONIQ_TOKEN="tu-token-de-LocationIQ"
 node server.js
 ```
@@ -24,5 +23,5 @@ curl -X POST http://localhost:4173/api/viaje/cotizar \
 ```
 
 La respuesta incluye distancia, tiempo, casetas, tarifa estimada y el GeoJSON de la ruta.
-El endpoint `/api/viaje/distancia` recibe el mismo formato de coordenadas y devuelve la distancia y el tiempo calculados por INEGI. El endpoint `/api/geocode` usa LocationIQ para obtener latitud y longitud; la agrupación de pasajeros usa la distancia vial de INEGI.
+El endpoint `/api/viaje/distancia` recibe el mismo formato de coordenadas y devuelve la distancia y el tiempo calculados por LocationIQ. El endpoint `/api/geocode` también usa LocationIQ; la tarifa se calcula localmente con la configuración de banderazo, costo por kilómetro y costo por minuto.
 No guardes el token en `app,js`, `index.html` ni en otro archivo servido al navegador. El token compartido en la conversación debe revocarse y sustituirse por uno nuevo.

@@ -484,7 +484,7 @@ async function distanciaRutaKm(a, b, cache) {
   });
   const resultado = await response.json();
   if (!response.ok || !Number.isFinite(Number(resultado.distanciaKm))) {
-    throw new Error(resultado.error || 'INEGI no devolvió una distancia válida.');
+    throw new Error(resultado.error || 'LocationIQ no devolvió una distancia válida.');
   }
 
   cache[cacheKey] = Number(resultado.distanciaKm);

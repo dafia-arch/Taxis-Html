@@ -1,7 +1,7 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { geocodeDireccion, cotizarViaje, calcularDistanciaRuta } = require('./inegi-ruteo-taxi');
+const { geocodeDireccion, cotizarViaje, calcularDistanciaRuta } = require('./locationiq-ruteo-taxi');
 
 const PORT = process.env.PORT || 4173;
 const root = __dirname;
@@ -91,7 +91,7 @@ const server = http.createServer((request, response) => {
         sendJson(response, 200, cotizacion);
       })
       .catch(error => {
-        const faltaToken = error.message.includes('INEGI_TOKEN');
+        const faltaToken = error.message.includes('LOCATIONIQ_TOKEN');
         const esSolicitudInvalida = error.message.includes('debe incluir')
           || error.message.includes('Tipo de ruta no válido')
           || error.message.includes('JSON válido')
@@ -114,7 +114,7 @@ const server = http.createServer((request, response) => {
         sendJson(response, 200, distancia);
       })
       .catch(error => {
-        const faltaToken = error.message.includes('INEGI_TOKEN');
+        const faltaToken = error.message.includes('LOCATIONIQ_TOKEN');
         const esSolicitudInvalida = error.message.includes('debe incluir')
           || error.message.includes('JSON válido')
           || error.message.includes('demasiado grande');
