@@ -607,6 +607,26 @@ async function abrirModalRutas() {
   modalRutas.classList.add('flex');
 }
 
+async function recalcularRutasGuardadas() {
+  const boton = document.getElementById('btnRecalcularRutas');
+  const textoOriginal = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = 'Recalculando...';
+
+  try {
+    const solicitudes = obtenerSolicitudesParaRutas();
+    await geocodificarSolicitudes(solicitudes);
+    await renderSolicitudesAdmin();
+    await abrirModalRutas();
+  } catch (error) {
+    console.error('No se pudieron recalcular las rutas:', error);
+    alert(`No se pudieron recalcular las rutas: ${error.message}`);
+  } finally {
+    boton.disabled = false;
+    boton.textContent = textoOriginal;
+  }
+}
+
 function cerrarModalRutas() {
   modalRutas.classList.add('hidden');
   modalRutas.classList.remove('flex');
@@ -947,6 +967,7 @@ document.getElementById('btnAbrirAdmin').addEventListener('click', () => {
 document.getElementById('btnLoginAdmin').addEventListener('click', iniciarSesionAdmin);
 document.getElementById('btnCerrarSesionAdmin').addEventListener('click', cerrarSesionAdmin);
 document.getElementById('btnAbrirRutas').addEventListener('click', abrirModalRutas);
+document.getElementById('btnRecalcularRutas').addEventListener('click', recalcularRutasGuardadas);
 document.getElementById('btnCerrarModalRutas').addEventListener('click', cerrarModalRutas);
 modalRutas.addEventListener('click', (event) => {
   if (event.target === modalRutas) cerrarModalRutas();
