@@ -22,6 +22,7 @@ const STORAGE_KEY = 'taxiRequestsLocalTest';
 const MAX_ROUTE_DISTANCE_KM = 10;
 const MAX_ROUTE_SIZE = 4;
 const TIME_WINDOW_MINUTES = 30;
+const ROUTE_DISTANCE_CACHE_KEY = 'taxiRouteDistanceCache';
 const adminPortal = document.getElementById('adminPortal');
 const adminLoginBox = document.getElementById('adminLoginBox');
 const adminDashboard = document.getElementById('adminDashboard');
@@ -382,18 +383,6 @@ function direccionDeSolicitud(solicitud) {
     .filter(Boolean).join(', ');
 }
 
-function distanciaKm(a, b) {
-  if (!Number.isFinite(a.lat) || !Number.isFinite(a.lon) || !Number.isFinite(b.lat) || !Number.isFinite(b.lon)) return Infinity;
-  const radioTierraKm = 6371;
-  const aLat = a.lat * Math.PI / 180;
-  const bLat = b.lat * Math.PI / 180;
-  const diferenciaLat = (b.lat - a.lat) * Math.PI / 180;
-  const diferenciaLon = (b.lon - a.lon) * Math.PI / 180;
-  const haversine = Math.sin(diferenciaLat / 2) ** 2
-    + Math.cos(aLat) * Math.cos(bLat) * Math.sin(diferenciaLon / 2) ** 2;
-  return 2 * radioTierraKm * Math.asin(Math.sqrt(haversine));
-}
-
 function obtenerCacheGeocodificacion() {
   try {
     return JSON.parse(localStorage.getItem('taxiGeocodeCache') || '{}');
@@ -409,7 +398,7 @@ function esperar(milisegundos) {
 async function consultarGeocodificacion(consulta) {
   const direccionCodificada = encodeURIComponent(consulta);
   const response = await fetch(`/api/geocode?address=${direccionCodificada}`);
-  if (!response.ok) throw new Error(`Google Maps respondió ${response.status}`);
+  if (!response.ok) throw new Error(`El servicio de geocodificación respondió ${response.status}`);
   return response.json();
 }
 
@@ -469,8 +458,43 @@ async function geocodificarSolicitudes(solicitudes) {
   return solicitudes;
 }
 
-function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) {
+function obtenerCacheDistanciasRuta() {
+  try {
+    return JSON.parse(localStorage.getItem(ROUTE_DISTANCE_CACHE_KEY) || '{}');
+  } catch (error) {
+    return {};
+  }
+}
+
+async function distanciaRutaKm(a, b, cache) {
+  if (!Number.isFinite(Number(a.lat)) || !Number.isFinite(Number(a.lon))
+    || !Number.isFinite(Number(b.lat)) || !Number.isFinite(Number(b.lon))) return Infinity;
+
+  const ids = [String(a.id), String(b.id)].sort();
+  const cacheKey = ids.join('__');
+  if (Number.isFinite(cache[cacheKey])) return cache[cacheKey];
+
+  const response = await fetch('/api/viaje/distancia', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      origen: { lat: Number(a.lat), lon: Number(a.lon) },
+      destino: { lat: Number(b.lat), lon: Number(b.lon) }
+    })
+  });
+  const resultado = await response.json();
+  if (!response.ok || !Number.isFinite(Number(resultado.distanciaKm))) {
+    throw new Error(resultado.error || 'INEGI no devolvió una distancia válida.');
+  }
+
+  cache[cacheKey] = Number(resultado.distanciaKm);
+  localStorage.setItem(ROUTE_DISTANCE_CACHE_KEY, JSON.stringify(cache));
+  return cache[cacheKey];
+}
+
+async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) {
   const grupos = new Map();
+  const cacheDistancias = obtenerCacheDistanciasRuta();
 
   solicitudes.forEach(solicitud => {
     const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
@@ -496,7 +520,7 @@ function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) 
     });
   });
 
-  return [...grupos.entries()].map(([clave, grupo]) => {
+  return (await Promise.all([...grupos.entries()].map(async ([clave, grupo]) => {
     const { fecha: fechaTexto, hora: horaTexto, items } = grupo;
     const rutas = [];
     const pendientes = [...items];
@@ -504,11 +528,10 @@ function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) 
       const referencia = pendientes.shift();
       const ruta = [referencia];
       while (ruta.length < MAX_ROUTE_SIZE && pendientes.length) {
-        const candidatos = pendientes.map((item, indice) => ({
-          item,
-          indice,
-          distanciaMaxima: Math.max(...ruta.map(parte => distanciaKm(parte, item)))
-        }))
+        const candidatos = (await Promise.all(pendientes.map(async (item, indice) => {
+          const distancias = await Promise.all(ruta.map(parte => distanciaRutaKm(parte, item, cacheDistancias)));
+          return { item, indice, distanciaMaxima: Math.max(...distancias) };
+        })))
           .filter(candidato => candidato.distanciaMaxima <= MAX_ROUTE_DISTANCE_KM)
           .sort((a, b) => a.distanciaMaxima - b.distanciaMaxima);
 
@@ -520,7 +543,7 @@ function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) 
       rutas.push(ruta);
     }
     return { clave, fecha: fechaTexto, hora: horaTexto, rutas };
-  }).sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
+  }))).sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
 }
 
 async function renderSolicitudesAdmin() {
@@ -548,7 +571,7 @@ async function renderSolicitudesAdmin() {
 
   tablaSolicitudesAdmin.innerHTML = filas || '<tr><td colspan="5" class="px-3 py-5 text-center text-slate-500">Sin solicitudes registradas.</td></tr>';
 
-  const grupos = agruparSolicitudesPorRuta(solicitudes);
+  const grupos = await agruparSolicitudesPorRuta(solicitudes);
   contadorRutas.textContent = String(grupos.reduce((total, grupo) => total + grupo.rutas.length, 0));
 
   gruposRutasAdmin.innerHTML = grupos.map(grupo => `
@@ -571,7 +594,7 @@ async function renderSolicitudesAdmin() {
 async function abrirModalRutas() {
   const solicitudes = obtenerSolicitudesParaRutas();
   await geocodificarSolicitudes(solicitudes);
-  const grupos = agruparSolicitudesPorRuta(solicitudes);
+  const grupos = await agruparSolicitudesPorRuta(solicitudes);
   if (!grupos.length) {
     modalRutasBody.innerHTML = '<p class="text-slate-500">No hay solicitudes para generar rutas.</p>';
     modalRutas.classList.remove('hidden');
@@ -607,8 +630,7 @@ async function abrirModalRutas() {
   modalRutas.classList.add('flex');
 }
 
-async function recalcularRutasGuardadas() {
-  const boton = document.getElementById('btnRecalcularRutas');
+async function recalcularRutasGuardadas(boton = document.getElementById('btnRecalcularRutas')) {
   const textoOriginal = boton.textContent;
   boton.disabled = true;
   boton.textContent = 'Recalculando...';
@@ -640,7 +662,10 @@ function iniciarSesionAdmin() {
     adminLoginBox.classList.add('hidden');
     adminDashboard.classList.remove('hidden');
     adminPortal.classList.remove('hidden');
-    renderSolicitudesAdmin();
+    renderSolicitudesAdmin().catch(error => {
+      console.error('No se pudo cargar la asignación de rutas:', error);
+      alert(`No se pudo calcular la asignación de rutas: ${error.message}`);
+    });
     return;
   }
 
@@ -963,11 +988,13 @@ document.getElementById('btnAbrirAdmin').addEventListener('click', () => {
   adminPortal.classList.remove('hidden');
   adminLoginBox.classList.remove('hidden');
   adminDashboard.classList.add('hidden');
+  adminPortal.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
 document.getElementById('btnLoginAdmin').addEventListener('click', iniciarSesionAdmin);
 document.getElementById('btnCerrarSesionAdmin').addEventListener('click', cerrarSesionAdmin);
 document.getElementById('btnAbrirRutas').addEventListener('click', abrirModalRutas);
-document.getElementById('btnRecalcularRutas').addEventListener('click', recalcularRutasGuardadas);
+document.getElementById('btnRecalcularRutas').addEventListener('click', event => recalcularRutasGuardadas(event.currentTarget));
+document.getElementById('btnRecalcularRutasModal').addEventListener('click', event => recalcularRutasGuardadas(event.currentTarget));
 document.getElementById('btnCerrarModalRutas').addEventListener('click', cerrarModalRutas);
 modalRutas.addEventListener('click', (event) => {
   if (event.target === modalRutas) cerrarModalRutas();

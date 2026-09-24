@@ -1,10 +1,9 @@
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-const { cotizarViaje } = require('./inegi-ruteo-taxi');
+const { geocodeDireccion, cotizarViaje, calcularDistanciaRuta } = require('./inegi-ruteo-taxi');
 
 const PORT = process.env.PORT || 4173;
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 const root = __dirname;
 
 const mimeTypes = {
@@ -69,26 +68,14 @@ const server = http.createServer((request, response) => {
       sendJson(response, 400, { error: 'La dirección es obligatoria y debe tener menos de 300 caracteres.' });
       return;
     }
-    if (!GOOGLE_MAPS_API_KEY) {
-      sendJson(response, 503, { error: 'Falta configurar GOOGLE_MAPS_API_KEY en el servidor.' });
-      return;
-    }
-
-    fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&components=country:MX&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`)
-      .then(async geocodeResponse => {
-        if (!geocodeResponse.ok) throw new Error(`Google Maps respondió ${geocodeResponse.status}`);
-        const resultado = await geocodeResponse.json();
-        if (resultado.status !== 'OK') {
-          sendJson(response, 200, { lat: null, lon: null, status: resultado.status });
-          return;
-        }
-        const ubicacion = resultado.results[0]?.geometry?.location;
-        sendJson(response, 200, ubicacion
-          ? { lat: Number(ubicacion.lat), lon: Number(ubicacion.lng), displayName: resultado.results[0].formatted_address }
-          : { lat: null, lon: null });
-    }).catch(error => {
-      sendJson(response, 502, { error: 'No se pudo geocodificar la dirección con Google Maps.', detail: error.message });
-    });
+    geocodeDireccion(address)
+      .then(resultado => sendJson(response, 200, resultado))
+      .catch(error => {
+        const faltaToken = error.message.includes('LOCATIONIQ_TOKEN');
+        const esSolicitudInvalida = error.message.includes('La dirección es obligatoria');
+        const statusCode = faltaToken ? 503 : esSolicitudInvalida ? 400 : 502;
+        sendJson(response, statusCode, { error: error.message });
+      });
     return;
   }
 
@@ -107,6 +94,28 @@ const server = http.createServer((request, response) => {
         const faltaToken = error.message.includes('INEGI_TOKEN');
         const esSolicitudInvalida = error.message.includes('debe incluir')
           || error.message.includes('Tipo de ruta no válido')
+          || error.message.includes('JSON válido')
+          || error.message.includes('demasiado grande');
+        const statusCode = faltaToken ? 503 : esSolicitudInvalida ? 400 : 502;
+        sendJson(response, statusCode, { error: error.message });
+      });
+    return;
+  }
+
+  if (request.method === 'POST' && requestPath === '/api/viaje/distancia') {
+    leerJson(request)
+      .then(async body => {
+        if (!body.origen || !body.destino) {
+          sendJson(response, 400, { error: 'Debes enviar origen y destino.' });
+          return;
+        }
+
+        const distancia = await calcularDistanciaRuta(body.origen, body.destino);
+        sendJson(response, 200, distancia);
+      })
+      .catch(error => {
+        const faltaToken = error.message.includes('INEGI_TOKEN');
+        const esSolicitudInvalida = error.message.includes('debe incluir')
           || error.message.includes('JSON válido')
           || error.message.includes('demasiado grande');
         const statusCode = faltaToken ? 503 : esSolicitudInvalida ? 400 : 502;
