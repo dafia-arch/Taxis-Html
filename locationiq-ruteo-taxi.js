@@ -1,6 +1,30 @@
 const LOCATIONIQ_URL = 'https://us1.locationiq.com/v1/search';
 const LOCATIONIQ_DIRECTIONS_URL = 'https://us1.locationiq.com/v1/directions/driving';
 const LOCATIONIQ_TOKEN = process.env.LOCATIONIQ_TOKEN || '';
+const INTERVALO_LOCATIONIQ_MS = 1100;
+let colaLocationIQ = Promise.resolve();
+let ultimaSolicitudLocationIQ = 0;
+
+function esperar(milisegundos) {
+  return new Promise(resolve => setTimeout(resolve, milisegundos));
+}
+
+function solicitarLocationIQ(url) {
+  const solicitud = colaLocationIQ.then(async () => {
+    for (let intento = 0; intento < 3; intento += 1) {
+      const espera = Math.max(0, INTERVALO_LOCATIONIQ_MS - (Date.now() - ultimaSolicitudLocationIQ));
+      if (espera) await esperar(espera);
+      ultimaSolicitudLocationIQ = Date.now();
+
+      const respuesta = await fetch(url);
+      if (respuesta.status !== 429 || intento === 2) return respuesta;
+      await esperar(2000 * (intento + 1));
+    }
+  });
+
+  colaLocationIQ = solicitud.catch(() => {});
+  return solicitud;
+}
 
 function validarToken() {
   if (!LOCATIONIQ_TOKEN) {
@@ -27,7 +51,7 @@ async function geocodeDireccion(direccion) {
     limit: '1',
     countrycodes: 'mx'
   });
-  const respuesta = await fetch(`${LOCATIONIQ_URL}?${parametros.toString()}`);
+  const respuesta = await solicitarLocationIQ(`${LOCATIONIQ_URL}?${parametros.toString()}`);
   if (!respuesta.ok) {
     if (respuesta.status === 404) {
       throw new Error(`No se encontraron coordenadas para: "${direccion}"`);
@@ -58,7 +82,7 @@ async function calcularRuta(origen, destino) {
     overview: 'full',
     geometries: 'geojson'
   });
-  const respuesta = await fetch(`${LOCATIONIQ_DIRECTIONS_URL}/${puntos}?${parametros.toString()}`);
+  const respuesta = await solicitarLocationIQ(`${LOCATIONIQ_DIRECTIONS_URL}/${puntos}?${parametros.toString()}`);
   if (!respuesta.ok) {
     throw new Error(`Error HTTP en rutas de LocationIQ: ${respuesta.status}`);
   }

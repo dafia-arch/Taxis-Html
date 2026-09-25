@@ -88,7 +88,9 @@ const server = http.createServer((request, response) => {
       .catch(error => {
         const faltaToken = error.message.includes('LOCATIONIQ_TOKEN');
         const esSolicitudInvalida = error.message.includes('La dirección es obligatoria');
-        const statusCode = faltaToken ? 503 : esSolicitudInvalida ? 400 : 502;
+        const esLimiteLocationIQ = error.message.includes('LocationIQ: 429')
+          || error.message.includes('rutas de LocationIQ: 429');
+        const statusCode = faltaToken ? 503 : esSolicitudInvalida ? 400 : esLimiteLocationIQ ? 429 : 502;
         sendJson(response, statusCode, { error: error.message });
       });
     return;
@@ -111,7 +113,9 @@ const server = http.createServer((request, response) => {
           || error.message.includes('Tipo de ruta no válido')
           || error.message.includes('JSON válido')
           || error.message.includes('demasiado grande');
-        const statusCode = faltaToken ? 503 : esSolicitudInvalida ? 400 : 502;
+        const esLimiteLocationIQ = error.message.includes('LocationIQ: 429')
+          || error.message.includes('rutas de LocationIQ: 429');
+        const statusCode = faltaToken ? 503 : esSolicitudInvalida ? 400 : esLimiteLocationIQ ? 429 : 502;
         sendJson(response, statusCode, { error: error.message });
       });
     return;
