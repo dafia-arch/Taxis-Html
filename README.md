@@ -10,6 +10,8 @@ export LOCATIONIQ_TOKEN="tu-token-de-LocationIQ"
 node server.js
 ```
 
+Si el frontend se publica en GitHub Pages, cambia `window.TAXI_API_BASE_URL` en `index.html` por la URL pública donde desplegues este backend. GitHub Pages solo sirve archivos estáticos y no puede ejecutar `server.js`.
+
 Ejemplo de petición:
 
 ```bash

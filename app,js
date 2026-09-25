@@ -35,6 +35,15 @@ const modalRutasBody = document.getElementById('modalRutasBody');
 const contadorIndividuales = document.getElementById('contadorIndividuales');
 const contadorMasivas = document.getElementById('contadorMasivas');
 const contadorRutas = document.getElementById('contadorRutas');
+const pruebaOrigen = document.getElementById('pruebaOrigen');
+const pruebaDestino = document.getElementById('pruebaDestino');
+const btnProbarRuta = document.getElementById('btnProbarRuta');
+const resultadoPruebaRuta = document.getElementById('resultadoPruebaRuta');
+const API_BASE_URL = String(window.TAXI_API_BASE_URL || '').replace(/\/$/, '');
+
+function apiFetch(path, opciones) {
+  return fetch(`${API_BASE_URL}${path}`, opciones);
+}
 
 function normalizarCp(valor) {
   return String(valor || '').replace(/\D/g, '').slice(0, 5);
@@ -397,7 +406,7 @@ function esperar(milisegundos) {
 
 async function consultarGeocodificacion(consulta) {
   const direccionCodificada = encodeURIComponent(consulta);
-  const response = await fetch(`/api/geocode?address=${direccionCodificada}`);
+  const response = await apiFetch(`/api/geocode?address=${direccionCodificada}`);
   if (!response.ok) throw new Error(`El servicio de geocodificación respondió ${response.status}`);
   return response.json();
 }
@@ -474,7 +483,7 @@ async function distanciaRutaKm(a, b, cache) {
   const cacheKey = ids.join('__');
   if (Number.isFinite(cache[cacheKey])) return cache[cacheKey];
 
-  const response = await fetch('/api/viaje/distancia', {
+  const response = await apiFetch('/api/viaje/distancia', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -490,6 +499,36 @@ async function distanciaRutaKm(a, b, cache) {
   cache[cacheKey] = Number(resultado.distanciaKm);
   localStorage.setItem(ROUTE_DISTANCE_CACHE_KEY, JSON.stringify(cache));
   return cache[cacheKey];
+}
+
+async function probarRuta() {
+  const origenTexto = pruebaOrigen.value.trim();
+  const destinoTexto = pruebaDestino.value.trim();
+  if (!origenTexto || !destinoTexto) {
+    resultadoPruebaRuta.textContent = 'Escribe un origen y un destino.';
+    return;
+  }
+
+  btnProbarRuta.disabled = true;
+  resultadoPruebaRuta.textContent = 'Geocodificando y calculando ruta...';
+  try {
+    const [origen, destino] = await Promise.all([
+      consultarGeocodificacion(origenTexto),
+      consultarGeocodificacion(destinoTexto)
+    ]);
+    const response = await apiFetch('/api/viaje/distancia', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ origen, destino })
+    });
+    const resultado = await response.json();
+    if (!response.ok) throw new Error(resultado.error || 'No se pudo calcular la ruta.');
+    resultadoPruebaRuta.textContent = `${resultado.distanciaKm.toFixed(2)} km, ${resultado.tiempoMin.toFixed(0)} minutos.`;
+  } catch (error) {
+    resultadoPruebaRuta.textContent = error.message;
+  } finally {
+    btnProbarRuta.disabled = false;
+  }
 }
 
 async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRutas()) {
@@ -662,10 +701,7 @@ function iniciarSesionAdmin() {
     adminLoginBox.classList.add('hidden');
     adminDashboard.classList.remove('hidden');
     adminPortal.classList.remove('hidden');
-    renderSolicitudesAdmin().catch(error => {
-      console.error('No se pudo cargar la asignación de rutas:', error);
-      alert(`No se pudo calcular la asignación de rutas: ${error.message}`);
-    });
+    renderSolicitudesAdmin().catch(error => console.error('No se pudo cargar la asignación de rutas:', error));
     return;
   }
 
@@ -996,6 +1032,7 @@ document.getElementById('btnAbrirRutas').addEventListener('click', abrirModalRut
 document.getElementById('btnRecalcularRutas').addEventListener('click', event => recalcularRutasGuardadas(event.currentTarget));
 document.getElementById('btnRecalcularRutasModal').addEventListener('click', event => recalcularRutasGuardadas(event.currentTarget));
 document.getElementById('btnCerrarModalRutas').addEventListener('click', cerrarModalRutas);
+btnProbarRuta.addEventListener('click', probarRuta);
 modalRutas.addEventListener('click', (event) => {
   if (event.target === modalRutas) cerrarModalRutas();
 });

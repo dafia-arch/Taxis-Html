@@ -16,7 +16,12 @@ const mimeTypes = {
 };
 
 function sendJson(response, statusCode, body) {
-  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  response.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type'
+  });
   response.end(JSON.stringify(body));
 }
 
@@ -61,6 +66,16 @@ function serveStatic(request, response) {
 
 const server = http.createServer((request, response) => {
   const requestPath = new URL(request.url, `http://${request.headers.host || 'localhost'}`).pathname;
+
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    });
+    response.end();
+    return;
+  }
 
   if (request.method === 'GET' && requestPath === '/api/geocode') {
     const address = new URL(request.url, `http://${request.headers.host || 'localhost'}`).searchParams.get('address');
