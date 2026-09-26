@@ -26,6 +26,11 @@ const MAX_ROUTE_DISTANCE_KM = 10;
 const MAX_ROUTE_SIZE = 4;
 const TIME_WINDOW_MINUTES = 30;
 const ROUTE_GROUP_CUTOFF_HOURS = 4;
+const MENSAJES_PROGRAMACION = {
+  fecha: 'INFRACCIÓN DE LA AVT: EVENTO NEXUS 🚨\n\n¡Alto ahí, Variante! La Autoridad de Variación Temporal ha detectado un intento de enviar un taxi al pasado. Alterar la Sagrada Línea Temporal está estrictamente prohibido. Ingresa una fecha de hoy o del futuro, o enviaremos a los Minuteros a podar esta solicitud... y posiblemente a ti. ¡Por Todo el Tiempo. Siempre! ⏳🚕',
+  hora: '🚨 ALERTA DE VARIANTE 🚨\n\n¡El tiempo solo fluye en una dirección! Intentaste programar un taxi en una hora que ya pasó. Ingresa una hora válida en el presente o futuro, o preparate para ser podado por los Minuteros. ⏱️🚕',
+  turno: '🚨 INFRACCIÓN AVT / LÍMITE LABORAL\n\n¡Variante! La línea temporal se rompió: la salida no puede estar en el pasado, y el turno no puede exceder las 12 horas. Corrige el horario o los Minuteros auditarán la planta.'
+};
 const ROUTE_DISTANCE_CACHE_KEY = 'taxiRouteDistanceCache';
 const COORDENADAS_PLANTAS = {
   '3A': { plantaLat: 25.5887676, plantaLon: -100.8938679 },
@@ -80,18 +85,17 @@ function actualizarMinimosFechaHora(fecha, hora) {
 }
 
 function validarProgramacion(fecha, hora) {
-  const mensaje = 'No puedes programar un viaje en una fecha u hora que ya pasó.';
   fecha.setCustomValidity('');
   hora.setCustomValidity('');
   actualizarMinimosFechaHora(fecha, hora);
 
   if (fecha.value && fecha.value < fechaLocal()) {
-    fecha.setCustomValidity(mensaje);
-    return fecha;
+    fecha.setCustomValidity(MENSAJES_PROGRAMACION.fecha);
+    return { control: fecha, tipo: 'fecha' };
   }
   if (fecha.value && hora.value && new Date(`${fecha.value}T${hora.value}`).getTime() < Date.now()) {
-    hora.setCustomValidity(mensaje);
-    return hora;
+    hora.setCustomValidity(MENSAJES_PROGRAMACION.hora);
+    return { control: hora, tipo: 'hora' };
   }
   return null;
 }
@@ -99,6 +103,7 @@ function validarProgramacion(fecha, hora) {
 function validarProgramaciones() {
   const viaje = document.getElementById('viaje').value;
   const pares = [];
+  const redondos = [];
   if (servicioSelect.value === 'Masivo') {
     [...cuerpoTablaMasivo.rows].forEach(fila => {
       const tipoViaje = fila.cells[3].querySelector('select')?.value;
@@ -109,16 +114,40 @@ function validarProgramaciones() {
       actualizarMinimosFechaHora(fecha, horaSalida);
       if (tipoViaje === 'Entrada' || tipoViaje === 'Redondo') pares.push([fecha, horaEntrada]);
       if (tipoViaje === 'Salida' || tipoViaje === 'Redondo') pares.push([fecha, horaSalida]);
+      if (tipoViaje === 'Redondo') redondos.push([fecha, horaEntrada, fecha, horaSalida]);
       if (!tipoViaje) pares.push([fecha, horaEntrada]);
     });
   } else {
-    if (viaje === 'Entrada' || viaje === 'Redondo') pares.push([document.getElementById('fechaEntrada'), document.getElementById('horaEntrada')]);
-    if (viaje === 'Salida' || viaje === 'Redondo') pares.push([document.getElementById('fechaSalida'), document.getElementById('horaSalida')]);
+    const fechaEntrada = document.getElementById('fechaEntrada');
+    const horaEntrada = document.getElementById('horaEntrada');
+    const fechaSalida = document.getElementById('fechaSalida');
+    const horaSalida = document.getElementById('horaSalida');
+    if (viaje === 'Entrada' || viaje === 'Redondo') pares.push([fechaEntrada, horaEntrada]);
+    if (viaje === 'Salida' || viaje === 'Redondo') pares.push([fechaSalida, horaSalida]);
+    if (viaje === 'Redondo') redondos.push([fechaEntrada, horaEntrada, fechaSalida, horaSalida]);
   }
 
   const invalido = pares.map(([fecha, hora]) => validarProgramacion(fecha, hora)).find(Boolean);
-  if (invalido) invalido.reportValidity();
-  return !invalido;
+  if (invalido) {
+    alert(MENSAJES_PROGRAMACION[invalido.tipo]);
+    invalido.control.reportValidity();
+    return false;
+  }
+
+  for (const [fechaEntrada, horaEntrada, fechaSalida, horaSalida] of redondos) {
+    if (!fechaEntrada.value || !horaEntrada.value || !fechaSalida.value || !horaSalida.value) continue;
+    const inicio = new Date(`${fechaEntrada.value}T${horaEntrada.value}`).getTime();
+    const fin = new Date(`${fechaSalida.value}T${horaSalida.value}`).getTime();
+    const duracion = fin - inicio;
+    if (!Number.isFinite(duracion) || duracion <= 0 || duracion > 12 * 60 * 60 * 1000) {
+      horaSalida.setCustomValidity(MENSAJES_PROGRAMACION.turno);
+      alert(MENSAJES_PROGRAMACION.turno);
+      horaSalida.reportValidity();
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function normalizarCp(valor) {
@@ -1489,6 +1518,7 @@ modalRutas.addEventListener('click', (event) => {
 
 form.addEventListener('submit', event => {
   event.preventDefault();
+  if (!validarProgramaciones()) return;
   const esMasivo = servicioSelect.value === 'Masivo';
   const payload = esMasivo
     ? { tipoServicio: 'Masivo', solicitudes: [...cuerpoTablaMasivo.rows].map(fila => ({ ...valoresDeFila(fila), ligaGoogleMaps: fila.dataset.urlMapa || enlacesDeDireccion([valoresDeFila(fila).calle, valoresDeFila(fila).numero, valoresDeFila(fila).colonia, valoresDeFila(fila).ciudad, valoresDeFila(fila).cp, 'México'].filter(Boolean).join(', ')).googleMaps })) }
