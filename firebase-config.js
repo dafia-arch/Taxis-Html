@@ -31,7 +31,7 @@ const firebaseReady = new Promise((resolve, reject) => {
 window.taxiFirebase = {
   auth: firebaseAuth,
   db: firebase.firestore(),
-  adminUid: 'xW9j182ayrcB0xyIrCOn84SRtBN2',
+  adminUid: 'xW9j182ayrcB0xyIrCOn84SRtBN2N',
   ready: firebaseReady,
   async ensureSession() {
     await firebaseReady;
