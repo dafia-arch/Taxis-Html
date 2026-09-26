@@ -23,6 +23,10 @@ const MAX_ROUTE_DISTANCE_KM = 10;
 const MAX_ROUTE_SIZE = 4;
 const TIME_WINDOW_MINUTES = 30;
 const ROUTE_DISTANCE_CACHE_KEY = 'taxiRouteDistanceCache';
+const COORDENADAS_PLANTAS = {
+  '3A': { plantaLat: 25.5887676, plantaLon: -100.8938679 },
+  '3B': { plantaLat: 25.5850267, plantaLon: -100.8996309 }
+};
 const adminPortal = document.getElementById('adminPortal');
 const adminLoginBox = document.getElementById('adminLoginBox');
 const adminDashboard = document.getElementById('adminDashboard');
@@ -43,6 +47,68 @@ const API_BASE_URL = String(window.TAXI_API_BASE_URL || '').replace(/\/$/, '');
 
 function apiFetch(path, opciones) {
   return fetch(`${API_BASE_URL}${path}`, opciones);
+}
+
+function fechaLocal(date = new Date()) {
+  const año = date.getFullYear();
+  const mes = String(date.getMonth() + 1).padStart(2, '0');
+  const dia = String(date.getDate()).padStart(2, '0');
+  return `${año}-${mes}-${dia}`;
+}
+
+function horaMinimaLocal(date = new Date()) {
+  const minuto = new Date(date);
+  if (minuto.getSeconds() || minuto.getMilliseconds()) minuto.setMinutes(minuto.getMinutes() + 1);
+  return `${String(minuto.getHours()).padStart(2, '0')}:${String(minuto.getMinutes()).padStart(2, '0')}`;
+}
+
+function actualizarMinimosFechaHora(fecha, hora) {
+  const hoy = fechaLocal();
+  fecha.min = hoy;
+  if (fecha.value === hoy) hora.min = horaMinimaLocal();
+  else hora.removeAttribute('min');
+}
+
+function validarProgramacion(fecha, hora) {
+  const mensaje = 'No puedes programar un viaje en una fecha u hora que ya pasó.';
+  fecha.setCustomValidity('');
+  hora.setCustomValidity('');
+  actualizarMinimosFechaHora(fecha, hora);
+
+  if (fecha.value && fecha.value < fechaLocal()) {
+    fecha.setCustomValidity(mensaje);
+    return fecha;
+  }
+  if (fecha.value && hora.value && new Date(`${fecha.value}T${hora.value}`).getTime() < Date.now()) {
+    hora.setCustomValidity(mensaje);
+    return hora;
+  }
+  return null;
+}
+
+function validarProgramaciones() {
+  const viaje = document.getElementById('viaje').value;
+  const pares = [];
+  if (servicioSelect.value === 'Masivo') {
+    [...cuerpoTablaMasivo.rows].forEach(fila => {
+      const tipoViaje = fila.cells[3].querySelector('select')?.value;
+      const fecha = fila.cells[4].querySelector('input');
+      const horaEntrada = fila.querySelector('[data-horario="entrada"]');
+      const horaSalida = fila.querySelector('[data-horario="salida"]');
+      actualizarMinimosFechaHora(fecha, horaEntrada);
+      actualizarMinimosFechaHora(fecha, horaSalida);
+      if (tipoViaje === 'Entrada' || tipoViaje === 'Redondo') pares.push([fecha, horaEntrada]);
+      if (tipoViaje === 'Salida' || tipoViaje === 'Redondo') pares.push([fecha, horaSalida]);
+      if (!tipoViaje) pares.push([fecha, horaEntrada]);
+    });
+  } else {
+    if (viaje === 'Entrada' || viaje === 'Redondo') pares.push([document.getElementById('fechaEntrada'), document.getElementById('horaEntrada')]);
+    if (viaje === 'Salida' || viaje === 'Redondo') pares.push([document.getElementById('fechaSalida'), document.getElementById('horaSalida')]);
+  }
+
+  const invalido = pares.map(([fecha, hora]) => validarProgramacion(fecha, hora)).find(Boolean);
+  if (invalido) invalido.reportValidity();
+  return !invalido;
 }
 
 function normalizarCp(valor) {
@@ -262,6 +328,10 @@ function guardarSolicitudes(solicitudes) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(solicitudes));
 }
 
+function coordenadasDePlanta(localidad) {
+  return COORDENADAS_PLANTAS[String(localidad || '').trim()] || {};
+}
+
 function registrarSolicitud(payload) {
   const solicitudes = obtenerSolicitudesGuardadas();
   const registros = payload.tipoServicio === 'Masivo'
@@ -269,6 +339,9 @@ function registrarSolicitud(payload) {
         id: `masiva-${Date.now()}-${index}`,
         tipoServicio: 'Masivo',
         nombre: item.nombreEmp || 'Cliente',
+        localidad: item.localidad || '',
+        viaje: item.viaje || '',
+        ...coordenadasDePlanta(item.localidad),
         fecha: item.fechaEntrada || item.fechaSalida || item.fecha || new Date().toISOString().slice(0, 10),
         hora: item.horaEntrada || item.horaSalida || '08:00',
         direccion: [item.calle, item.numero, item.colonia, item.ciudad, item.cp, 'México'].filter(Boolean).join(', '),
@@ -284,6 +357,9 @@ function registrarSolicitud(payload) {
         id: `individual-${Date.now()}`,
         tipoServicio: 'Individual',
         nombre: payload.datos?.nombreEmp || 'Cliente',
+        localidad: payload.datos?.localidad || '',
+        viaje: payload.datos?.viaje || '',
+        ...coordenadasDePlanta(payload.datos?.localidad),
         fecha: payload.datos?.fechaEntrada || payload.datos?.fechaSalida || new Date().toISOString().slice(0, 10),
         hora: payload.datos?.horaEntrada || payload.datos?.horaSalida || '08:00',
         direccion: [payload.datos?.calleInput || payload.datos?.calle, payload.datos?.numeroInput || payload.datos?.numero, payload.datos?.colonia, payload.datos?.ciudadInput || payload.datos?.ciudad, payload.datos?.cpInput || payload.datos?.cp, 'México'].filter(Boolean).join(', '),
@@ -538,8 +614,12 @@ async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRut
   solicitudes.forEach(solicitud => {
     const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
     const minutos = minutosDesdeMedianoche(horaTexto);
+    const localidad = solicitud.localidad || '';
+    const viaje = solicitud.viaje || '';
     const grupoExistente = [...grupos.values()].find(grupo => (
       grupo.fecha === fechaTexto
+      && grupo.localidad === localidad
+      && grupo.viaje === viaje
       && minutos !== null
       && grupo.minutos !== null
       && Math.abs(grupo.minutos - minutos) <= TIME_WINDOW_MINUTES
@@ -555,6 +635,8 @@ async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRut
       fecha: fechaTexto,
       hora: horaTexto,
       minutos,
+      localidad,
+      viaje,
       items: [solicitud]
     });
   });
@@ -568,7 +650,16 @@ async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRut
       const ruta = [referencia];
       while (ruta.length < MAX_ROUTE_SIZE && pendientes.length) {
         const candidatos = (await Promise.all(pendientes.map(async (item, indice) => {
-          const distancias = await Promise.all(ruta.map(parte => distanciaRutaKm(parte, item, cacheDistancias)));
+          const referencias = [...ruta];
+          const planta = ruta[0];
+          if (Number.isFinite(Number(planta.plantaLat)) && Number.isFinite(Number(planta.plantaLon))) {
+            referencias.push({
+              id: `planta-${planta.localidad}`,
+              lat: planta.plantaLat,
+              lon: planta.plantaLon
+            });
+          }
+          const distancias = await Promise.all(referencias.map(parte => distanciaRutaKm(parte, item, cacheDistancias)));
           return { item, indice, distanciaMaxima: Math.max(...distancias) };
         })))
           .filter(candidato => candidato.distanciaMaxima <= MAX_ROUTE_DISTANCE_KM)
