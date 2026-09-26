@@ -274,9 +274,16 @@
 
         <div class="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
           <div class="rounded-2xl border border-slate-200 bg-white p-4">
-            <div class="mb-3 flex items-center justify-between">
+            <div class="mb-3 flex flex-wrap items-end justify-between gap-3">
               <h3 class="text-lg font-bold text-slate-800">Solicitudes registradas</h3>
+              <div class="flex flex-wrap items-end gap-2">
+                <label class="text-xs font-semibold text-slate-600">Consultar fecha
+                  <input id="filtroFechaProgramacion" type="date" class="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                </label>
+                <button id="btnMostrarPendientes" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Pendientes vigentes</button>
+              </div>
             </div>
+            <p id="estadoFiltroSolicitudes" role="status" class="mb-2 text-xs text-slate-500"></p>
             <div class="max-h-[430px] overflow-auto">
               <table class="min-w-full border-collapse text-left text-sm">
                 <thead class="sticky top-0 bg-slate-100 text-xs uppercase tracking-wide text-slate-600">
@@ -286,6 +293,7 @@
                     <th class="px-3 py-2">Cliente</th>
                     <th class="px-3 py-2">Fecha</th>
                     <th class="px-3 py-2">Hora</th>
+                    <th class="px-3 py-2">Chofer / teléfono</th>
                     <th class="px-3 py-2">Dirección</th>
                   </tr>
                 </thead>

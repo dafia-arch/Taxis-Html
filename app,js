@@ -59,6 +59,7 @@ const formularioAltaChofer = document.getElementById('formularioAltaChofer');
 const API_BASE_URL = String(window.TAXI_API_BASE_URL || '').replace(/\/$/, '');
 let usuarioActual = null;
 let gruposRutasActuales = [];
+let solicitudesProgramacionActuales = [];
 
 function apiFetch(path, opciones) {
   return fetch(`${API_BASE_URL}${path}`, opciones);
@@ -269,6 +270,28 @@ function obtenerUsuariosProgramadores() {
 function obtenerAsignacionesRutas() {
   const asignaciones = leerAlmacenamientoLocal(ROUTE_ASSIGNMENTS_STORAGE_KEY, {});
   return asignaciones && typeof asignaciones === 'object' && !Array.isArray(asignaciones) ? asignaciones : {};
+}
+
+function solicitudEstaVigente(solicitud) {
+  const fechaHora = new Date(`${solicitud.fecha || ''}T${solicitud.hora || ''}`).getTime();
+  return Number.isFinite(fechaHora) && fechaHora >= Date.now();
+}
+
+function claveChoferDeSolicitud(solicitud, asignaciones = obtenerAsignacionesRutas()) {
+  const ids = [solicitud.id, solicitud.sourceId].filter(Boolean).map(String);
+  const asignacion = Object.entries(asignaciones).find(([claveRuta, choferId]) => (
+    Boolean(choferId) && claveRuta.split('|').some(id => ids.includes(id))
+  ));
+  return asignacion?.[1] || '';
+}
+
+function filtrarSolicitudesProgramacion(solicitudes = obtenerSolicitudesParaRutas()) {
+  const fechaSeleccionada = document.getElementById('filtroFechaProgramacion').value;
+  if (fechaSeleccionada) return solicitudes.filter(solicitud => solicitud.fecha === fechaSeleccionada);
+  const asignaciones = obtenerAsignacionesRutas();
+  return solicitudes.filter(solicitud => (
+    solicitudEstaVigente(solicitud) && !claveChoferDeSolicitud(solicitud, asignaciones)
+  ));
 }
 
 function actualizarMapaIndividual() {
@@ -926,8 +949,18 @@ function eliminarChofer(id) {
 }
 
 async function renderSolicitudesAdmin() {
-  const solicitudes = obtenerSolicitudesParaRutas();
-  await geocodificarSolicitudes(solicitudes);
+  const solicitudes = filtrarSolicitudesProgramacion();
+  const solicitudesVigentes = solicitudes.filter(solicitudEstaVigente);
+  const fechaSeleccionada = document.getElementById('filtroFechaProgramacion').value;
+  const asignaciones = obtenerAsignacionesRutas();
+  const choferes = obtenerChoferes();
+  solicitudesProgramacionActuales = solicitudes;
+  if (solicitudesVigentes.length) await geocodificarSolicitudes(solicitudesVigentes);
+
+  const vencidas = solicitudes.length - solicitudesVigentes.length;
+  document.getElementById('estadoFiltroSolicitudes').textContent = fechaSeleccionada
+    ? `${solicitudes.length} solicitud(es) para ${fechaSeleccionada}; ${vencidas} vencida(s). Las vencidas no se recalculan.`
+    : `${solicitudes.length} solicitud(es) vigente(s) sin chofer asignado.`;
   const individuales = solicitudes.filter(item => item.tipoServicio === 'Individual');
   const masivas = solicitudes.filter(item => item.tipoServicio === 'Masivo');
   contadorIndividuales.textContent = String(new Set(individuales.map(item => item.sourceId || item.id)).size);
@@ -937,6 +970,8 @@ async function renderSolicitudesAdmin() {
     const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
     const nombre = escaparHtml(solicitud.nombre || 'Cliente');
     const direccion = escaparHtml(solicitud.direccion || [solicitud.calle, solicitud.numero, solicitud.colonia, solicitud.ciudad, solicitud.cp].filter(Boolean).join(', '));
+    const choferId = claveChoferDeSolicitud(solicitud, asignaciones);
+    const chofer = choferes.find(item => item.id === choferId);
     return `
       <tr class="border-t border-slate-200">
         <td class="px-3 py-2 font-semibold ${solicitud.tipoServicio === 'Masivo' ? 'text-cyan-700' : 'text-blue-700'}">${escaparHtml(solicitud.tipoServicio)}</td>
@@ -944,18 +979,18 @@ async function renderSolicitudesAdmin() {
         <td class="px-3 py-2">${nombre}</td>
         <td class="px-3 py-2">${escaparHtml(fechaTexto)}</td>
         <td class="px-3 py-2">${escaparHtml(horaTexto)}</td>
+        <td class="px-3 py-2">${chofer ? `${escaparHtml(chofer.nombre)} · ${escaparHtml(chofer.telefono)}` : 'Sin asignar'}</td>
         <td class="px-3 py-2">${direccion}</td>
       </tr>
     `;
   }).join('');
 
-  tablaSolicitudesAdmin.innerHTML = filas || '<tr><td colspan="6" class="px-3 py-5 text-center text-slate-500">Sin solicitudes registradas.</td></tr>';
+  tablaSolicitudesAdmin.innerHTML = filas || `<tr><td colspan="7" class="px-3 py-5 text-center text-slate-500">${fechaSeleccionada ? 'No hay solicitudes para la fecha seleccionada.' : 'No hay solicitudes vigentes sin chofer.'}</td></tr>`;
 
-  const grupos = await agruparSolicitudesPorRuta(solicitudes);
+  const grupos = solicitudesVigentes.length ? await agruparSolicitudesPorRuta(solicitudesVigentes) : [];
   gruposRutasActuales = grupos;
   contadorRutas.textContent = String(grupos.reduce((total, grupo) => total + grupo.rutas.length, 0));
-  const choferes = obtenerChoferes().filter(chofer => chofer.estatus === 'Activo');
-  const asignaciones = obtenerAsignacionesRutas();
+  const choferesActivos = choferes.filter(chofer => chofer.estatus === 'Activo');
 
   gruposRutasAdmin.innerHTML = grupos.map(grupo => `
     <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
@@ -976,7 +1011,7 @@ async function renderSolicitudesAdmin() {
               <label class="block text-xs font-semibold text-slate-600">Chofer asignado
                 <select data-asignar-ruta="${escaparHtml(rutaKey)}" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
                   <option value="">Sin asignar</option>
-                  ${choferes.map(chofer => `<option value="${escaparHtml(chofer.id)}" ${chofer.id === choferId ? 'selected' : ''}>${escaparHtml(chofer.nombre)} · ${escaparHtml(chofer.placas)}</option>`).join('')}
+                  ${choferesActivos.map(chofer => `<option value="${escaparHtml(chofer.id)}" ${chofer.id === choferId ? 'selected' : ''}>${escaparHtml(chofer.nombre)} · ${escaparHtml(chofer.placas)}</option>`).join('')}
                 </select>
               </label>
               <a href="${escaparHtml(ligaRuta)}" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800">Abrir ruta ↗</a>
@@ -987,17 +1022,14 @@ async function renderSolicitudesAdmin() {
         }).join('')}
       </div>
     </div>
-  `).join('') || '<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">No hay grupos de rutas todavía.</div>';
+  `).join('') || `<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">${fechaSeleccionada ? 'No hay rutas vigentes para recalcular en esta fecha.' : 'No hay solicitudes vigentes sin chofer para generar rutas.'}</div>`;
 }
 
 async function abrirModalRutas() {
-  const solicitudes = obtenerSolicitudesParaRutas();
-  await geocodificarSolicitudes(solicitudes);
-  const grupos = await agruparSolicitudesPorRuta(solicitudes);
-  gruposRutasActuales = grupos;
+  const grupos = gruposRutasActuales;
   const asignaciones = obtenerAsignacionesRutas();
   if (!grupos.length) {
-    modalRutasBody.innerHTML = '<p class="text-slate-500">No hay solicitudes para generar rutas.</p>';
+    modalRutasBody.innerHTML = '<p class="text-slate-500">No hay rutas vigentes para mostrar. Las solicitudes vencidas no se recalculan.</p>';
     modalRutas.classList.remove('hidden');
     modalRutas.classList.add('flex');
     return;
@@ -1043,8 +1075,6 @@ async function recalcularRutasGuardadas(boton = document.getElementById('btnReca
   boton.textContent = 'Recalculando...';
 
   try {
-    const solicitudes = obtenerSolicitudesParaRutas();
-    await geocodificarSolicitudes(solicitudes);
     await renderSolicitudesAdmin();
     await abrirModalRutas();
   } catch (error) {
@@ -1067,7 +1097,7 @@ async function descargarExcelProgramacion() {
     return;
   }
 
-  const solicitudes = obtenerSolicitudesParaRutas();
+  const solicitudes = solicitudesProgramacionActuales;
   if (!solicitudes.length) {
     alert('No hay solicitudes para exportar.');
     return;
@@ -1490,6 +1520,13 @@ document.getElementById('btnMostrarLogin').addEventListener('click', () => {
   cerrarSesionAdmin();
   adminPortal.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
+document.getElementById('filtroFechaProgramacion').addEventListener('change', () => {
+  renderSolicitudesAdmin().catch(error => console.error('No se pudo filtrar la programación:', error));
+});
+document.getElementById('btnMostrarPendientes').addEventListener('click', () => {
+  document.getElementById('filtroFechaProgramacion').value = '';
+  renderSolicitudesAdmin().catch(error => console.error('No se pudo cargar la programación vigente:', error));
+});
 tablaUsuarios.addEventListener('click', event => {
   const boton = event.target.closest('[data-eliminar-usuario]');
   if (boton) eliminarUsuarioProgramador(boton.dataset.eliminarUsuario);
@@ -1505,9 +1542,7 @@ gruposRutasAdmin.addEventListener('change', event => {
   if (selector.value) asignaciones[selector.dataset.asignarRuta] = selector.value;
   else delete asignaciones[selector.dataset.asignarRuta];
   localStorage.setItem(ROUTE_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(asignaciones));
-  const chofer = obtenerChoferes().find(item => item.id === selector.value);
-  selector.closest('[data-route-card]')
-    .querySelector('[data-telefono-chofer]').textContent = chofer?.telefono || 'Sin asignar';
+  renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la asignación:', error));
 });
 adminPassword.addEventListener('keydown', event => {
   if (event.key === 'Enter') iniciarSesionAdmin();

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "3A",
+    "nombre": "Planta 3A",
+    "direccion": "Planta 3A, Ramos Arizpe, Coahuila, México",
+    "lat": 25.5887676,
+    "lon": -100.8938679,
+    "activo": true
+  },
+  {
+    "id": "3B",
+    "nombre": "Planta 3B",
+    "direccion": "Planta 3B, Ramos Arizpe, Coahuila, México",
+    "lat": 25.5850267,
+    "lon": -100.8996309,
+    "activo": true
+  }
+]
