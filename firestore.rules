@@ -7,7 +7,7 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return signedIn() && request.auth.uid == 'xW9j182ayrcB0xyIrCOn84SRtBN2N';
+      return signedIn() && request.auth.uid == 'xW9j182ayrcB0xyIrCOn84SRtBN2';
     }
 
     function isActiveOperator() {
