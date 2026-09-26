@@ -294,6 +294,15 @@ async function importarColeccionFirestore(nombre, documentos) {
   }
 }
 
+async function ejecutarPasoFirestore(nombre, operacion) {
+  try {
+    return await operacion();
+  } catch (error) {
+    console.error(`Falló Firestore al ${nombre}:`, error);
+    throw new Error(`${nombre}: ${error.code || error.message}`);
+  }
+}
+
 async function migrarAlmacenamientoLocal() {
   let idNavegador = localStorage.getItem('taxiFirebaseMigrationId');
   if (!idNavegador) {
@@ -301,25 +310,25 @@ async function migrarAlmacenamientoLocal() {
     localStorage.setItem('taxiFirebaseMigrationId', idNavegador);
   }
   const migracion = TAXI_FIREBASE.db.collection('migrations').doc(`local-storage-v1-${idNavegador}`);
-  if ((await migracion.get()).exists) return;
+  if ((await ejecutarPasoFirestore('consultar marca de migración', () => migracion.get())).exists) return;
 
   const db = TAXI_FIREBASE.db;
   const solicitudesLocales = obtenerSolicitudesGuardadas().filter(solicitud => !String(solicitud.id).startsWith('demo-'));
-  await importarColeccionFirestore('requests', solicitudesLocales);
-  await importarColeccionFirestore('drivers', obtenerChoferes());
+  await ejecutarPasoFirestore('importar solicitudes locales', () => importarColeccionFirestore('requests', solicitudesLocales));
+  await ejecutarPasoFirestore('importar choferes locales', () => importarColeccionFirestore('drivers', obtenerChoferes()));
   const operadoresLocales = obtenerUsuariosProgramadores().map(operador => {
     const perfil = { ...operador };
     delete perfil.password;
     return { ...perfil, id: `legacy-${String(operador.id)}`, estatus: 'Requiere crear acceso' };
   });
-  await importarColeccionFirestore('operators', operadoresLocales);
+  await ejecutarPasoFirestore('importar perfiles locales', () => importarColeccionFirestore('operators', operadoresLocales));
 
   const asignacionesDoc = db.collection('settings').doc('routeAssignments');
-  if (!(await asignacionesDoc.get()).exists) {
-    await asignacionesDoc.set({ asignaciones: obtenerAsignacionesRutas() });
+  if (!(await ejecutarPasoFirestore('consultar asignaciones', () => asignacionesDoc.get())).exists) {
+    await ejecutarPasoFirestore('guardar asignaciones', () => asignacionesDoc.set({ asignaciones: obtenerAsignacionesRutas() }));
   }
 
-  await migracion.set({ completada: true, fecha: firebase.firestore.FieldValue.serverTimestamp() });
+  await ejecutarPasoFirestore('guardar marca de migración', () => migracion.set({ completada: true, fecha: firebase.firestore.FieldValue.serverTimestamp() }));
 }
 
 function refrescarVistasFirestore() {
@@ -356,15 +365,15 @@ async function cargarDatosFirestore() {
   if (usuarioActual?.rol === 'admin') await migrarAlmacenamientoLocal();
   const db = TAXI_FIREBASE.db;
   const [solicitudes, choferes, asignaciones] = await Promise.all([
-    db.collection('requests').get(),
-    db.collection('drivers').get(),
-    db.collection('settings').doc('routeAssignments').get()
+    ejecutarPasoFirestore('leer solicitudes', () => db.collection('requests').get()),
+    ejecutarPasoFirestore('leer choferes', () => db.collection('drivers').get()),
+    ejecutarPasoFirestore('leer asignaciones', () => db.collection('settings').doc('routeAssignments').get())
   ]);
   actualizarCacheFirestore(STORAGE_KEY, solicitudes.docs.map(documento => ({ id: documento.id, ...documento.data() })));
   actualizarCacheFirestore(DRIVERS_STORAGE_KEY, choferes.docs.map(documento => ({ id: documento.id, ...documento.data() })));
   actualizarCacheFirestore(ROUTE_ASSIGNMENTS_STORAGE_KEY, asignaciones.data()?.asignaciones || {});
   if (usuarioActual?.rol === 'admin') {
-    const operadores = await db.collection('operators').get();
+    const operadores = await ejecutarPasoFirestore('leer programadores', () => db.collection('operators').get());
     actualizarCacheFirestore(USERS_STORAGE_KEY, operadores.docs.map(documento => ({ id: documento.id, ...documento.data() })));
   }
   iniciarEscuchasFirestore();
