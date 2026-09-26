@@ -19,9 +19,13 @@ const direccionMasiva = document.getElementById('direccionMasiva');
 const columnasMasivas = ['numEmp', 'nombreEmp', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
 const ADMIN_CREDENTIALS = { username: 'admin', password: 'admin123' };
 const STORAGE_KEY = 'taxiRequestsLocalTest';
+const USERS_STORAGE_KEY = 'taxiSchedulingUsers';
+const DRIVERS_STORAGE_KEY = 'taxiDrivers';
+const ROUTE_ASSIGNMENTS_STORAGE_KEY = 'taxiRouteAssignments';
 const MAX_ROUTE_DISTANCE_KM = 10;
 const MAX_ROUTE_SIZE = 4;
 const TIME_WINDOW_MINUTES = 30;
+const ROUTE_GROUP_CUTOFF_HOURS = 4;
 const ROUTE_DISTANCE_CACHE_KEY = 'taxiRouteDistanceCache';
 const COORDENADAS_PLANTAS = {
   '3A': { plantaLat: 25.5887676, plantaLon: -100.8938679 },
@@ -43,7 +47,13 @@ const pruebaOrigen = document.getElementById('pruebaOrigen');
 const pruebaDestino = document.getElementById('pruebaDestino');
 const btnProbarRuta = document.getElementById('btnProbarRuta');
 const resultadoPruebaRuta = document.getElementById('resultadoPruebaRuta');
+const tablaUsuarios = document.getElementById('tablaUsuarios');
+const tablaChoferes = document.getElementById('tablaChoferes');
+const formularioAltaUsuario = document.getElementById('formularioAltaUsuario');
+const formularioAltaChofer = document.getElementById('formularioAltaChofer');
 const API_BASE_URL = String(window.TAXI_API_BASE_URL || '').replace(/\/$/, '');
+let usuarioActual = null;
+let gruposRutasActuales = [];
 
 function apiFetch(path, opciones) {
   return fetch(`${API_BASE_URL}${path}`, opciones);
@@ -178,6 +188,58 @@ function enlacesDeDireccion(direccion) {
     mapa: `https://maps.google.com/maps?q=${query}&t=&z=15&ie=UTF8&iwloc=&output=embed`,
     googleMaps: `https://www.google.com/maps/search/?api=1&query=${query}`
   };
+}
+
+function claveRuta(ruta) {
+  return ruta.map(item => String(item.id || direccionDeSolicitud(item))).sort().join('|');
+}
+
+function ligaGoogleMapsDeRuta(ruta) {
+  if (!ruta.length) return '';
+  const direcciones = ruta.map(direccionDeSolicitud).filter(Boolean);
+  if (!direcciones.length) return '';
+
+  const primera = ruta[0];
+  const tienePlanta = Number.isFinite(Number(primera.plantaLat)) && Number.isFinite(Number(primera.plantaLon));
+  const planta = tienePlanta ? `${primera.plantaLat},${primera.plantaLon}` : '';
+  const esSalida = primera.viaje === 'Salida';
+  const origen = esSalida && planta ? planta : direcciones[0];
+  const destino = !esSalida && planta ? planta : direcciones[direcciones.length - 1];
+  const paradas = esSalida && planta
+    ? direcciones.slice(0, -1)
+    : !esSalida && planta
+      ? direcciones.slice(1)
+      : direcciones.slice(1, -1);
+  const parametros = new URLSearchParams({ api: '1', origin: origen, destination: destino, travelmode: 'driving' });
+  if (paradas.length) parametros.set('waypoints', paradas.join('|'));
+  return `https://www.google.com/maps/dir/?${parametros.toString()}`;
+}
+
+function leerAlmacenamientoLocal(clave, valorPredeterminado) {
+  try {
+    return JSON.parse(localStorage.getItem(clave) || JSON.stringify(valorPredeterminado));
+  } catch (error) {
+    return valorPredeterminado;
+  }
+}
+
+function crearIdLocal(prefijo) {
+  return `${prefijo}-${window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+}
+
+function obtenerChoferes() {
+  const choferes = leerAlmacenamientoLocal(DRIVERS_STORAGE_KEY, []);
+  return Array.isArray(choferes) ? choferes : [];
+}
+
+function obtenerUsuariosProgramadores() {
+  const usuarios = leerAlmacenamientoLocal(USERS_STORAGE_KEY, []);
+  return Array.isArray(usuarios) ? usuarios : [];
+}
+
+function obtenerAsignacionesRutas() {
+  const asignaciones = leerAlmacenamientoLocal(ROUTE_ASSIGNMENTS_STORAGE_KEY, {});
+  return asignaciones && typeof asignaciones === 'object' && !Array.isArray(asignaciones) ? asignaciones : {};
 }
 
 function actualizarMapaIndividual() {
@@ -339,6 +401,7 @@ function registrarSolicitud(payload) {
         id: `masiva-${Date.now()}-${index}`,
         tipoServicio: 'Masivo',
         nombre: item.nombreEmp || 'Cliente',
+        programador: usuarioActual?.nombre || '',
         localidad: item.localidad || '',
         viaje: item.viaje || '',
         ...coordenadasDePlanta(item.localidad),
@@ -357,6 +420,7 @@ function registrarSolicitud(payload) {
         id: `individual-${Date.now()}`,
         tipoServicio: 'Individual',
         nombre: payload.datos?.nombreEmp || 'Cliente',
+        programador: usuarioActual?.nombre || '',
         localidad: payload.datos?.localidad || '',
         viaje: payload.datos?.viaje || '',
         ...coordenadasDePlanta(payload.datos?.localidad),
@@ -457,6 +521,14 @@ function minutosDesdeMedianoche(hora) {
   const coincidencia = String(hora || '').match(/^(\d{1,2}):(\d{2})/);
   if (!coincidencia) return null;
   return Number(coincidencia[1]) * 60 + Number(coincidencia[2]);
+}
+
+function estaDentroVentanaCierre(fecha, hora) {
+  const entrada = new Date(`${fecha}T${hora}`).getTime();
+  const diferencia = entrada - Date.now();
+  return Number.isFinite(entrada)
+    && diferencia >= 0
+    && diferencia < ROUTE_GROUP_CUTOFF_HOURS * 60 * 60 * 1000;
 }
 
 function obtenerSolicitudesParaRutas() {
@@ -616,7 +688,7 @@ async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRut
     const minutos = minutosDesdeMedianoche(horaTexto);
     const localidad = solicitud.localidad || '';
     const viaje = solicitud.viaje || '';
-    const grupoExistente = [...grupos.values()].find(grupo => (
+    const grupoExistente = estaDentroVentanaCierre(fechaTexto, horaTexto) ? null : [...grupos.values()].find(grupo => (
       grupo.fecha === fechaTexto
       && grupo.localidad === localidad
       && grupo.viaje === viaje
@@ -676,6 +748,107 @@ async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRut
   }))).sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
 }
 
+function mostrarEstadoAlta(id, texto, error = false) {
+  const estado = document.getElementById(id);
+  estado.textContent = texto;
+  estado.classList.toggle('text-red-700', error);
+  estado.classList.toggle('text-emerald-700', !error);
+}
+
+function renderUsuariosAdmin() {
+  if (!tablaUsuarios) return;
+  const usuarios = obtenerUsuariosProgramadores();
+  tablaUsuarios.innerHTML = usuarios.map(usuario => `
+    <tr class="border-t border-slate-200">
+      <td class="px-3 py-2 font-semibold">${escaparHtml(usuario.nombre)}</td>
+      <td class="px-3 py-2">${escaparHtml(usuario.usuario)}</td>
+      <td class="px-3 py-2">${escaparHtml(usuario.telefono)}</td>
+      <td class="px-3 py-2"><button type="button" data-eliminar-usuario="${escaparHtml(usuario.id)}" class="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50">Eliminar</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="4" class="px-3 py-5 text-center text-slate-500">Aún no hay usuarios programadores.</td></tr>';
+}
+
+function renderChoferesAdmin() {
+  if (!tablaChoferes) return;
+  const choferes = obtenerChoferes();
+  tablaChoferes.innerHTML = choferes.map(chofer => `
+    <tr class="border-t border-slate-200">
+      <td class="px-3 py-2 font-semibold">${escaparHtml(chofer.nombre)}</td>
+      <td class="px-3 py-2">${escaparHtml(chofer.telefono)}</td>
+      <td class="px-3 py-2">${escaparHtml(chofer.licencia)} (${escaparHtml(chofer.tipoLicencia)}) · vence ${escaparHtml(chofer.venceLicencia || 'Sin dato')}</td>
+      <td class="px-3 py-2">${escaparHtml(chofer.placas)} · ${escaparHtml(chofer.marca)} ${escaparHtml(chofer.modelo)} ${escaparHtml(chofer.anio)} · ${escaparHtml(chofer.color)} · seguro ${escaparHtml(chofer.seguro || 'Sin póliza')} (${escaparHtml(chofer.venceSeguro || 'Sin vencimiento')})</td>
+      <td class="px-3 py-2">${escaparHtml(chofer.estatus)}</td>
+      <td class="px-3 py-2"><button type="button" data-eliminar-chofer="${escaparHtml(chofer.id)}" class="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50">Eliminar</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="px-3 py-5 text-center text-slate-500">Aún no hay choferes registrados.</td></tr>';
+}
+
+function registrarUsuarioProgramador(event) {
+  event.preventDefault();
+  if (usuarioActual?.rol !== 'admin') return;
+  const nombre = document.getElementById('usuarioNombre').value.trim();
+  const usuario = document.getElementById('usuarioLogin').value.trim();
+  const password = document.getElementById('usuarioPassword').value;
+  const telefono = document.getElementById('usuarioTelefono').value.trim();
+  const usuarios = obtenerUsuariosProgramadores();
+  if (usuario.toLowerCase() === ADMIN_CREDENTIALS.username || usuarios.some(item => item.usuario.toLowerCase() === usuario.toLowerCase())) {
+    mostrarEstadoAlta('mensajeAltaUsuario', 'Ese nombre de usuario ya está registrado.', true);
+    return;
+  }
+
+  usuarios.push({ id: crearIdLocal('usuario'), nombre, usuario, password, telefono, estatus: 'Activo' });
+  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(usuarios));
+  formularioAltaUsuario.reset();
+  renderUsuariosAdmin();
+  mostrarEstadoAlta('mensajeAltaUsuario', 'Usuario programador registrado.');
+}
+
+function registrarChofer(event) {
+  event.preventDefault();
+  if (usuarioActual?.rol !== 'admin') return;
+  const chofer = {
+    id: crearIdLocal('chofer'),
+    nombre: document.getElementById('choferNombre').value.trim(),
+    telefono: document.getElementById('choferTelefono').value.trim(),
+    licencia: document.getElementById('choferLicencia').value.trim(),
+    tipoLicencia: document.getElementById('choferTipoLicencia').value.trim(),
+    venceLicencia: document.getElementById('choferVenceLicencia').value,
+    placas: document.getElementById('choferPlacas').value.trim().toUpperCase(),
+    marca: document.getElementById('choferMarca').value.trim(),
+    modelo: document.getElementById('choferModelo').value.trim(),
+    anio: document.getElementById('choferAnio').value,
+    color: document.getElementById('choferColor').value.trim(),
+    seguro: document.getElementById('choferSeguro').value.trim(),
+    venceSeguro: document.getElementById('choferVenceSeguro').value,
+    estatus: document.getElementById('choferEstatus').value
+  };
+  localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify([...obtenerChoferes(), chofer]));
+  formularioAltaChofer.reset();
+  renderChoferesAdmin();
+  renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la programación:', error));
+  mostrarEstadoAlta('mensajeAltaChofer', 'Chofer y vehículo registrados.');
+}
+
+function eliminarUsuarioProgramador(id) {
+  if (usuarioActual?.rol !== 'admin') return;
+  const usuarios = obtenerUsuariosProgramadores().filter(usuario => usuario.id !== id);
+  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(usuarios));
+  renderUsuariosAdmin();
+}
+
+function eliminarChofer(id) {
+  if (usuarioActual?.rol !== 'admin') return;
+  const choferes = obtenerChoferes().filter(chofer => chofer.id !== id);
+  localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(choferes));
+  const asignaciones = obtenerAsignacionesRutas();
+  Object.keys(asignaciones).forEach(clave => {
+    if (asignaciones[clave] === id) delete asignaciones[clave];
+  });
+  localStorage.setItem(ROUTE_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(asignaciones));
+  renderChoferesAdmin();
+  renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la programación:', error));
+}
+
 async function renderSolicitudesAdmin() {
   const solicitudes = obtenerSolicitudesParaRutas();
   await geocodificarSolicitudes(solicitudes);
@@ -686,14 +859,14 @@ async function renderSolicitudesAdmin() {
 
   const filas = solicitudes.map(solicitud => {
     const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
-    const nombre = solicitud.nombre || 'Cliente';
-    const direccion = solicitud.direccion || [solicitud.calle, solicitud.numero, solicitud.colonia, solicitud.ciudad, solicitud.cp].filter(Boolean).join(', ');
+    const nombre = escaparHtml(solicitud.nombre || 'Cliente');
+    const direccion = escaparHtml(solicitud.direccion || [solicitud.calle, solicitud.numero, solicitud.colonia, solicitud.ciudad, solicitud.cp].filter(Boolean).join(', '));
     return `
       <tr class="border-t border-slate-200">
-        <td class="px-3 py-2 font-semibold ${solicitud.tipoServicio === 'Masivo' ? 'text-cyan-700' : 'text-blue-700'}">${solicitud.tipoServicio}</td>
+        <td class="px-3 py-2 font-semibold ${solicitud.tipoServicio === 'Masivo' ? 'text-cyan-700' : 'text-blue-700'}">${escaparHtml(solicitud.tipoServicio)}</td>
         <td class="px-3 py-2">${nombre}</td>
-        <td class="px-3 py-2">${fechaTexto}</td>
-        <td class="px-3 py-2">${horaTexto}</td>
+        <td class="px-3 py-2">${escaparHtml(fechaTexto)}</td>
+        <td class="px-3 py-2">${escaparHtml(horaTexto)}</td>
         <td class="px-3 py-2">${direccion}</td>
       </tr>
     `;
@@ -702,20 +875,39 @@ async function renderSolicitudesAdmin() {
   tablaSolicitudesAdmin.innerHTML = filas || '<tr><td colspan="5" class="px-3 py-5 text-center text-slate-500">Sin solicitudes registradas.</td></tr>';
 
   const grupos = await agruparSolicitudesPorRuta(solicitudes);
+  gruposRutasActuales = grupos;
   contadorRutas.textContent = String(grupos.reduce((total, grupo) => total + grupo.rutas.length, 0));
+  const choferes = obtenerChoferes().filter(chofer => chofer.estatus === 'Activo');
+  const asignaciones = obtenerAsignacionesRutas();
 
   gruposRutasAdmin.innerHTML = grupos.map(grupo => `
     <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">${grupo.fecha} • ${grupo.hora}</p>
+      <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">${escaparHtml(grupo.fecha)} • ${escaparHtml(grupo.hora)}</p>
       <div class="space-y-2">
-        ${grupo.rutas.map((ruta, index) => `
-          <div class="rounded-xl border border-slate-200 bg-white p-2">
+        ${grupo.rutas.map((ruta, index) => {
+          const rutaKey = claveRuta(ruta);
+          const choferId = asignaciones[rutaKey] || '';
+          const choferAsignado = choferes.find(chofer => chofer.id === choferId);
+          const ligaRuta = ligaGoogleMapsDeRuta(ruta);
+          return `
+          <div data-route-card class="rounded-xl border border-slate-200 bg-white p-3">
             <p class="mb-2 text-xs font-bold uppercase tracking-wide text-slate-500">Ruta ${index + 1} (${ruta.length} personas)</p>
             <ul class="space-y-1 text-sm text-slate-700">
-              ${ruta.map(item => `<li>• ${item.nombre || 'Cliente'} — ${item.direccion || 'Sin dirección'}</li>`).join('')}
+              ${ruta.map(item => `<li>• ${escaparHtml(item.nombre || 'Cliente')} — ${escaparHtml(item.direccion || 'Sin dirección')}</li>`).join('')}
             </ul>
+            <div class="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+              <label class="block text-xs font-semibold text-slate-600">Chofer asignado
+                <select data-asignar-ruta="${escaparHtml(rutaKey)}" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm">
+                  <option value="">Sin asignar</option>
+                  ${choferes.map(chofer => `<option value="${escaparHtml(chofer.id)}" ${chofer.id === choferId ? 'selected' : ''}>${escaparHtml(chofer.nombre)} · ${escaparHtml(chofer.placas)}</option>`).join('')}
+                </select>
+              </label>
+              <a href="${escaparHtml(ligaRuta)}" target="_blank" rel="noopener" class="inline-flex items-center justify-center rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800">Abrir ruta ↗</a>
+            </div>
+            <p class="mt-2 text-xs text-slate-600">Teléfono del chofer: <span data-telefono-chofer class="font-semibold">${choferAsignado ? escaparHtml(choferAsignado.telefono) : 'Sin asignar'}</span></p>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     </div>
   `).join('') || '<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">No hay grupos de rutas todavía.</div>';
@@ -725,6 +917,8 @@ async function abrirModalRutas() {
   const solicitudes = obtenerSolicitudesParaRutas();
   await geocodificarSolicitudes(solicitudes);
   const grupos = await agruparSolicitudesPorRuta(solicitudes);
+  gruposRutasActuales = grupos;
+  const asignaciones = obtenerAsignacionesRutas();
   if (!grupos.length) {
     modalRutasBody.innerHTML = '<p class="text-slate-500">No hay solicitudes para generar rutas.</p>';
     modalRutas.classList.remove('hidden');
@@ -735,23 +929,29 @@ async function abrirModalRutas() {
   modalRutasBody.innerHTML = grupos.map(grupo => `
     <div class="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div class="mb-3 flex items-center justify-between">
-        <h4 class="text-lg font-bold text-slate-800">${grupo.fecha} • ${grupo.hora}</h4>
+        <h4 class="text-lg font-bold text-slate-800">${escaparHtml(grupo.fecha)} • ${escaparHtml(grupo.hora)}</h4>
         <span class="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">${grupo.rutas.length} rutas</span>
       </div>
       <div class="grid gap-3 md:grid-cols-2">
-        ${grupo.rutas.map((ruta, index) => `
+        ${grupo.rutas.map((ruta, index) => {
+          const chofer = obtenerChoferes().find(item => item.id === asignaciones[claveRuta(ruta)]);
+          const ligaRuta = ligaGoogleMapsDeRuta(ruta);
+          return `
           <div class="rounded-2xl border border-slate-200 bg-white p-3">
             <p class="mb-2 text-sm font-bold text-slate-700">Ruta ${index + 1} • ${ruta.length} pasajeros</p>
             <ol class="space-y-2 text-sm text-slate-600">
               ${ruta.map((item, pos) => `
                 <li class="rounded-lg bg-slate-50 p-2">
-                  <span class="font-semibold text-slate-700">${pos + 1}. ${item.nombre || 'Cliente'}</span><br>
-                  <span>${item.direccion || 'Sin dirección'}</span>
+                  <span class="font-semibold text-slate-700">${pos + 1}. ${escaparHtml(item.nombre || 'Cliente')}</span><br>
+                  <span>${escaparHtml(item.direccion || 'Sin dirección')}</span>
                 </li>
               `).join('')}
             </ol>
+            <p class="mt-3 text-xs text-slate-600">Chofer: <strong>${escaparHtml(chofer?.nombre || 'Sin asignar')}</strong> · ${escaparHtml(chofer?.telefono || 'Sin teléfono')}</p>
+            <a href="${escaparHtml(ligaRuta)}" target="_blank" rel="noopener" class="mt-2 inline-flex rounded-lg bg-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-blue-800">Abrir ruta en Google Maps ↗</a>
           </div>
-        `).join('')}
+        `;
+        }).join('')}
       </div>
     </div>
   `).join('');
@@ -784,22 +984,100 @@ function cerrarModalRutas() {
   modalRutas.classList.remove('flex');
 }
 
-function iniciarSesionAdmin() {
-  const usuario = adminUsuario.value.trim();
-  const password = adminPassword.value;
-
-  if (usuario === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
-    adminLoginBox.classList.add('hidden');
-    adminDashboard.classList.remove('hidden');
-    adminPortal.classList.remove('hidden');
-    renderSolicitudesAdmin().catch(error => console.error('No se pudo cargar la asignación de rutas:', error));
+async function descargarExcelProgramacion() {
+  if (!window.XLSX) {
+    alert('No se pudo cargar el componente de Excel. Revisa la conexión e inténtalo de nuevo.');
     return;
   }
 
-  alert('Credenciales incorrectas. Usa admin / admin123');
+  const solicitudes = obtenerSolicitudesParaRutas();
+  if (!solicitudes.length) {
+    alert('No hay solicitudes para exportar.');
+    return;
+  }
+
+  const rutaPorSolicitud = new Map();
+  const asignaciones = obtenerAsignacionesRutas();
+  gruposRutasActuales.forEach(grupo => grupo.rutas.forEach((ruta, indice) => {
+    const rutaKey = claveRuta(ruta);
+    const chofer = obtenerChoferes().find(item => item.id === asignaciones[rutaKey]);
+    const datosRuta = {
+      nombre: `Ruta ${indice + 1}`,
+      chofer: chofer?.nombre || 'Sin asignar',
+      telefono: chofer?.telefono || '',
+      liga: ligaGoogleMapsDeRuta(ruta)
+    };
+    ruta.forEach((item, parada) => rutaPorSolicitud.set(item.id, { ...datosRuta, parada: parada + 1 }));
+  }));
+
+  const filas = solicitudes.map(solicitud => {
+    const ruta = rutaPorSolicitud.get(solicitud.id) || {};
+    return {
+      Fecha: solicitud.fecha || '',
+      Hora: solicitud.hora || '',
+      Viaje: solicitud.viaje || '',
+      Planta: solicitud.localidad || '',
+      Programador: solicitud.programador || '',
+      Ruta: ruta.nombre || 'Pendiente de agrupar',
+      Parada: ruta.parada || '',
+      Pasajero: solicitud.nombre || '',
+      'Teléfono pasajero': solicitud.telefono || '',
+      Dirección: direccionDeSolicitud(solicitud),
+      Chofer: ruta.chofer || 'Sin asignar',
+      'Teléfono chofer': ruta.telefono || '',
+      'Liga de ruta': ruta.liga || ligaGoogleMapsDeRuta([solicitud])
+    };
+  });
+  const libro = window.XLSX.utils.book_new();
+  const hoja = window.XLSX.utils.json_to_sheet(filas);
+  window.XLSX.utils.book_append_sheet(libro, hoja, 'Programacion');
+  window.XLSX.writeFile(libro, 'programacion-taxis.xlsx');
+}
+
+function mostrarVistaAdmin(vista) {
+  document.querySelectorAll('[data-vista-panel]').forEach(panel => {
+    panel.classList.toggle('hidden', panel.dataset.vistaPanel !== vista);
+  });
+  document.querySelectorAll('[data-ir-vista]').forEach(boton => {
+    const activo = boton.dataset.irVista === vista;
+    boton.classList.toggle('bg-slate-900', activo);
+    boton.classList.toggle('text-white', activo);
+    boton.classList.toggle('bg-white', !activo);
+    boton.classList.toggle('text-slate-700', !activo);
+  });
+}
+
+function iniciarSesionAdmin() {
+  const usuario = adminUsuario.value.trim();
+  const password = adminPassword.value;
+  const esAdministrador = usuario === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password;
+  const cuentaUsuario = obtenerUsuariosProgramadores().find(item => (
+    item.usuario.toLowerCase() === usuario.toLowerCase()
+    && item.password === password
+    && item.estatus === 'Activo'
+  ));
+
+  if (!esAdministrador && !cuentaUsuario) {
+    alert('Credenciales incorrectas o cuenta inactiva.');
+    return;
+  }
+
+  usuarioActual = esAdministrador
+    ? { nombre: 'Administrador', usuario: 'admin', rol: 'admin' }
+    : { nombre: cuentaUsuario.nombre, usuario: cuentaUsuario.usuario, rol: 'programador' };
+  adminLoginBox.classList.add('hidden');
+  adminDashboard.classList.remove('hidden');
+  adminPortal.classList.remove('hidden');
+  document.querySelectorAll('[data-solo-admin]').forEach(elemento => elemento.classList.toggle('hidden', usuarioActual.rol !== 'admin'));
+  document.getElementById('sesionUsuarioNombre').textContent = usuarioActual.nombre;
+  renderUsuariosAdmin();
+  renderChoferesAdmin();
+  mostrarVistaAdmin('programacion');
+  renderSolicitudesAdmin().catch(error => console.error('No se pudo cargar la asignación de rutas:', error));
 }
 
 function cerrarSesionAdmin() {
+  usuarioActual = null;
   adminUsuario.value = '';
   adminPassword.value = '';
   adminLoginBox.classList.remove('hidden');
@@ -1111,6 +1389,7 @@ cuerpoTablaMasivo.addEventListener('copy', event => {
 document.getElementById('btnAgregarFila').addEventListener('click', () => crearFilaMasiva());
 document.getElementById('btnCopiarTablaMasiva').addEventListener('click', pegarTablaMasiva);
 document.getElementById('btnDescargarCsvMasiva').addEventListener('click', descargarCsvMasiva);
+document.getElementById('btnDescargarExcelProgramacion').addEventListener('click', descargarExcelProgramacion);
 document.getElementById('btnAbrirAdmin').addEventListener('click', () => {
   adminPortal.classList.remove('hidden');
   adminLoginBox.classList.remove('hidden');
@@ -1124,6 +1403,37 @@ document.getElementById('btnRecalcularRutas').addEventListener('click', event =>
 document.getElementById('btnRecalcularRutasModal').addEventListener('click', event => recalcularRutasGuardadas(event.currentTarget));
 document.getElementById('btnCerrarModalRutas').addEventListener('click', cerrarModalRutas);
 btnProbarRuta.addEventListener('click', probarRuta);
+formularioAltaUsuario.addEventListener('submit', registrarUsuarioProgramador);
+formularioAltaChofer.addEventListener('submit', registrarChofer);
+document.querySelectorAll('[data-ir-vista]').forEach(boton => {
+  boton.addEventListener('click', () => mostrarVistaAdmin(boton.dataset.irVista));
+});
+document.getElementById('btnMostrarLogin').addEventListener('click', () => {
+  cerrarSesionAdmin();
+  adminPortal.scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+tablaUsuarios.addEventListener('click', event => {
+  const boton = event.target.closest('[data-eliminar-usuario]');
+  if (boton) eliminarUsuarioProgramador(boton.dataset.eliminarUsuario);
+});
+tablaChoferes.addEventListener('click', event => {
+  const boton = event.target.closest('[data-eliminar-chofer]');
+  if (boton) eliminarChofer(boton.dataset.eliminarChofer);
+});
+gruposRutasAdmin.addEventListener('change', event => {
+  const selector = event.target.closest('[data-asignar-ruta]');
+  if (!selector) return;
+  const asignaciones = obtenerAsignacionesRutas();
+  if (selector.value) asignaciones[selector.dataset.asignarRuta] = selector.value;
+  else delete asignaciones[selector.dataset.asignarRuta];
+  localStorage.setItem(ROUTE_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(asignaciones));
+  const chofer = obtenerChoferes().find(item => item.id === selector.value);
+  selector.closest('[data-route-card]')
+    .querySelector('[data-telefono-chofer]').textContent = chofer?.telefono || 'Sin asignar';
+});
+adminPassword.addEventListener('keydown', event => {
+  if (event.key === 'Enter') iniciarSesionAdmin();
+});
 modalRutas.addEventListener('click', (event) => {
   if (event.target === modalRutas) cerrarModalRutas();
 });
