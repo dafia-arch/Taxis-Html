@@ -202,7 +202,7 @@ function ligaGoogleMapsDeRuta(ruta) {
   const primera = ruta[0];
   const tienePlanta = Number.isFinite(Number(primera.plantaLat)) && Number.isFinite(Number(primera.plantaLon));
   const planta = tienePlanta ? `${primera.plantaLat},${primera.plantaLon}` : '';
-  const esSalida = primera.viaje === 'Salida';
+  const esSalida = primera.sentido === 'Salida' || (!primera.sentido && primera.viaje === 'Salida');
   const origen = esSalida && planta ? planta : direcciones[0];
   const destino = !esSalida && planta ? planta : direcciones[direcciones.length - 1];
   const paradas = esSalida && planta
@@ -405,6 +405,10 @@ function registrarSolicitud(payload) {
         localidad: item.localidad || '',
         viaje: item.viaje || '',
         ...coordenadasDePlanta(item.localidad),
+        fechaEntrada: item.fechaEntrada || '',
+        horaEntrada: item.horaEntrada || '',
+        fechaSalida: item.fechaSalida || '',
+        horaSalida: item.horaSalida || '',
         fecha: item.fechaEntrada || item.fechaSalida || item.fecha || new Date().toISOString().slice(0, 10),
         hora: item.horaEntrada || item.horaSalida || '08:00',
         direccion: [item.calle, item.numero, item.colonia, item.ciudad, item.cp, 'México'].filter(Boolean).join(', '),
@@ -424,6 +428,10 @@ function registrarSolicitud(payload) {
         localidad: payload.datos?.localidad || '',
         viaje: payload.datos?.viaje || '',
         ...coordenadasDePlanta(payload.datos?.localidad),
+        fechaEntrada: payload.datos?.fechaEntrada || '',
+        horaEntrada: payload.datos?.horaEntrada || '',
+        fechaSalida: payload.datos?.fechaSalida || '',
+        horaSalida: payload.datos?.horaSalida || '',
         fecha: payload.datos?.fechaEntrada || payload.datos?.fechaSalida || new Date().toISOString().slice(0, 10),
         hora: payload.datos?.horaEntrada || payload.datos?.horaSalida || '08:00',
         direccion: [payload.datos?.calleInput || payload.datos?.calle, payload.datos?.numeroInput || payload.datos?.numero, payload.datos?.colonia, payload.datos?.ciudadInput || payload.datos?.ciudad, payload.datos?.cpInput || payload.datos?.cp, 'México'].filter(Boolean).join(', '),
@@ -532,7 +540,46 @@ function estaDentroVentanaCierre(fecha, hora) {
 }
 
 function obtenerSolicitudesParaRutas() {
-  return obtenerSolicitudesGuardadas().filter(item => item && (item.direccion || item.calle || item.colonia));
+  return obtenerSolicitudesGuardadas()
+    .filter(item => item && (item.direccion || item.calle || item.colonia))
+    .flatMap(solicitud => {
+      const sourceId = solicitud.sourceId || solicitud.id;
+      if (solicitud.viaje !== 'Redondo') {
+        return [{
+          ...solicitud,
+          sourceId,
+          sentido: solicitud.viaje === 'Salida' ? 'Salida' : 'Entrada',
+          fecha: solicitud.fechaSalida || solicitud.fecha,
+          hora: solicitud.horaSalida || solicitud.hora
+        }];
+      }
+
+      const tramos = [];
+      const fechaEntrada = solicitud.fechaEntrada || solicitud.fecha;
+      const horaEntrada = solicitud.horaEntrada || solicitud.hora;
+      if (fechaEntrada && horaEntrada) {
+        tramos.push({
+          ...solicitud,
+          id: `${sourceId}-entrada`,
+          sourceId,
+          sentido: 'Entrada',
+          fecha: fechaEntrada,
+          hora: horaEntrada
+        });
+      }
+      const fechaSalida = solicitud.fechaSalida || solicitud.fecha;
+      if (fechaSalida && solicitud.horaSalida) {
+        tramos.push({
+          ...solicitud,
+          id: `${sourceId}-salida`,
+          sourceId,
+          sentido: 'Salida',
+          fecha: fechaSalida,
+          hora: solicitud.horaSalida
+        });
+      }
+      return tramos;
+    });
 }
 
 function direccionDeSolicitud(solicitud) {
@@ -605,7 +652,7 @@ async function geocodificarSolicitudes(solicitudes) {
   }
   localStorage.setItem('taxiGeocodeCache', JSON.stringify(cache));
   if (hayCambios) {
-    const coordenadasPorId = new Map(solicitudes.map(solicitud => [solicitud.id, { lat: solicitud.lat, lon: solicitud.lon }]));
+    const coordenadasPorId = new Map(solicitudes.map(solicitud => [solicitud.sourceId || solicitud.id, { lat: solicitud.lat, lon: solicitud.lon }]));
     const solicitudesGuardadas = obtenerSolicitudesGuardadas().map(solicitud => ({
       ...solicitud,
       ...(coordenadasPorId.get(solicitud.id) || {})
@@ -687,11 +734,11 @@ async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRut
     const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
     const minutos = minutosDesdeMedianoche(horaTexto);
     const localidad = solicitud.localidad || '';
-    const viaje = solicitud.viaje || '';
+    const sentido = solicitud.sentido || (solicitud.viaje === 'Salida' ? 'Salida' : 'Entrada');
     const grupoExistente = estaDentroVentanaCierre(fechaTexto, horaTexto) ? null : [...grupos.values()].find(grupo => (
       grupo.fecha === fechaTexto
       && grupo.localidad === localidad
-      && grupo.viaje === viaje
+      && grupo.sentido === sentido
       && minutos !== null
       && grupo.minutos !== null
       && Math.abs(grupo.minutos - minutos) <= TIME_WINDOW_MINUTES
@@ -708,7 +755,7 @@ async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRut
       hora: horaTexto,
       minutos,
       localidad,
-      viaje,
+      sentido,
       items: [solicitud]
     });
   });
@@ -744,7 +791,7 @@ async function agruparSolicitudesPorRuta(solicitudes = obtenerSolicitudesParaRut
       }
       rutas.push(ruta);
     }
-    return { clave, fecha: fechaTexto, hora: horaTexto, rutas };
+    return { clave, fecha: fechaTexto, hora: horaTexto, sentido: grupo.sentido, rutas };
   }))).sort((a, b) => `${a.fecha} ${a.hora}`.localeCompare(`${b.fecha} ${b.hora}`));
 }
 
@@ -854,8 +901,8 @@ async function renderSolicitudesAdmin() {
   await geocodificarSolicitudes(solicitudes);
   const individuales = solicitudes.filter(item => item.tipoServicio === 'Individual');
   const masivas = solicitudes.filter(item => item.tipoServicio === 'Masivo');
-  contadorIndividuales.textContent = String(individuales.length);
-  contadorMasivas.textContent = String(masivas.length);
+  contadorIndividuales.textContent = String(new Set(individuales.map(item => item.sourceId || item.id)).size);
+  contadorMasivas.textContent = String(new Set(masivas.map(item => item.sourceId || item.id)).size);
 
   const filas = solicitudes.map(solicitud => {
     const { fechaTexto, horaTexto } = normalizarFechaHora(solicitud.fecha, solicitud.hora);
@@ -864,6 +911,7 @@ async function renderSolicitudesAdmin() {
     return `
       <tr class="border-t border-slate-200">
         <td class="px-3 py-2 font-semibold ${solicitud.tipoServicio === 'Masivo' ? 'text-cyan-700' : 'text-blue-700'}">${escaparHtml(solicitud.tipoServicio)}</td>
+        <td class="px-3 py-2">${escaparHtml(solicitud.sentido || '')}</td>
         <td class="px-3 py-2">${nombre}</td>
         <td class="px-3 py-2">${escaparHtml(fechaTexto)}</td>
         <td class="px-3 py-2">${escaparHtml(horaTexto)}</td>
@@ -872,7 +920,7 @@ async function renderSolicitudesAdmin() {
     `;
   }).join('');
 
-  tablaSolicitudesAdmin.innerHTML = filas || '<tr><td colspan="5" class="px-3 py-5 text-center text-slate-500">Sin solicitudes registradas.</td></tr>';
+  tablaSolicitudesAdmin.innerHTML = filas || '<tr><td colspan="6" class="px-3 py-5 text-center text-slate-500">Sin solicitudes registradas.</td></tr>';
 
   const grupos = await agruparSolicitudesPorRuta(solicitudes);
   gruposRutasActuales = grupos;
@@ -882,7 +930,7 @@ async function renderSolicitudesAdmin() {
 
   gruposRutasAdmin.innerHTML = grupos.map(grupo => `
     <div class="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-      <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">${escaparHtml(grupo.fecha)} • ${escaparHtml(grupo.hora)}</p>
+      <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">${escaparHtml(grupo.fecha)} • ${escaparHtml(grupo.hora)} • ${escaparHtml(grupo.sentido)}</p>
       <div class="space-y-2">
         ${grupo.rutas.map((ruta, index) => {
           const rutaKey = claveRuta(ruta);
@@ -929,7 +977,7 @@ async function abrirModalRutas() {
   modalRutasBody.innerHTML = grupos.map(grupo => `
     <div class="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div class="mb-3 flex items-center justify-between">
-        <h4 class="text-lg font-bold text-slate-800">${escaparHtml(grupo.fecha)} • ${escaparHtml(grupo.hora)}</h4>
+        <h4 class="text-lg font-bold text-slate-800">${escaparHtml(grupo.fecha)} • ${escaparHtml(grupo.hora)} • ${escaparHtml(grupo.sentido)}</h4>
         <span class="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-bold text-blue-700">${grupo.rutas.length} rutas</span>
       </div>
       <div class="grid gap-3 md:grid-cols-2">
@@ -1016,6 +1064,7 @@ async function descargarExcelProgramacion() {
       Fecha: solicitud.fecha || '',
       Hora: solicitud.hora || '',
       Viaje: solicitud.viaje || '',
+      Sentido: solicitud.sentido || '',
       Planta: solicitud.localidad || '',
       Programador: solicitud.programador || '',
       Ruta: ruta.nombre || 'Pendiente de agrupar',
