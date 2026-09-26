@@ -16,7 +16,7 @@ const mapaMasivoContainer = document.getElementById('mapaMasivoContainer');
 const mapaIframeMasivo = document.getElementById('mapaIframeMasivo');
 const linkGoogleMapsMasivo = document.getElementById('linkGoogleMapsMasivo');
 const direccionMasiva = document.getElementById('direccionMasiva');
-const columnasMasivas = ['numEmp', 'nombreEmp', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
+const columnasMasivas = ['numEmp', 'nombreEmp', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario', 'destinoTemporal'];
 const STORAGE_KEY = 'taxiRequestsLocalTest';
 const USERS_STORAGE_KEY = 'taxiSchedulingUsers';
 const DRIVERS_STORAGE_KEY = 'taxiDrivers';
@@ -149,7 +149,7 @@ function validarProgramaciones() {
     const horaEntrada = document.getElementById('horaEntrada');
     const fechaSalida = document.getElementById('fechaSalida');
     const horaSalida = document.getElementById('horaSalida');
-    if (viaje === 'Entrada' || viaje === 'Redondo' || viaje === 'Temporal') pares.push([fechaEntrada, horaEntrada]);
+    if (viaje === 'Entrada' || viaje === 'Redondo') pares.push([fechaEntrada, horaEntrada]);
     if (viaje === 'Salida' || viaje === 'Redondo') pares.push([fechaSalida, horaSalida]);
     if (viaje === 'Redondo') redondos.push([fechaEntrada, horaEntrada, fechaSalida, horaSalida]);
   }
@@ -328,6 +328,7 @@ function renderLocalidadesSelect() {
     obtenerLocalidades().filter(item => item.activo !== false).forEach(item => {
       select.add(new Option(item.nombre, item.id));
     });
+    select.add(new Option('Domicilio temporal · punto a punto', 'Temporal'));
     if ([...select.options].some(option => option.value === valor)) select.value = valor;
   });
 }
@@ -596,8 +597,8 @@ function valoresIndividuales() {
 
 function actualizarCamposDeViaje() {
   const viaje = document.getElementById('viaje').value;
-  const temporal = viaje === 'Temporal';
-  const entrada = viaje === 'Entrada' || viaje === 'Redondo' || temporal;
+  const temporal = document.getElementById('localidad').value === 'Temporal';
+  const entrada = viaje === 'Entrada' || viaje === 'Redondo';
   const salida = viaje === 'Salida' || viaje === 'Redondo';
   const cambiarVisibilidad = (id, visible) => {
     const elemento = document.getElementById(id);
@@ -618,6 +619,7 @@ function actualizarCamposDeViaje() {
   });
   document.getElementById('localidad').closest('label').classList.toggle('hidden', temporal);
   document.getElementById('localidad').required = !temporal;
+  document.getElementById('viaje').required = true;
   ['temporalCp', 'temporalCiudad', 'temporalColonia', 'temporalCalle', 'temporalNumero'].forEach(id => {
     document.getElementById(id).required = temporal;
   });
@@ -672,7 +674,7 @@ function escaparHtml(valor) {
 }
 
 function htmlTablaMasiva() {
-  const encabezados = ['No. Empleado', 'Nombre del empleado', 'Localidad', 'Viaje', 'Fecha', 'Horarios', 'CP', 'Ciudad', 'Colonia', 'Calle', 'Número', 'Teléfono', 'Comentario'];
+  const encabezados = ['No. Empleado', 'Nombre del empleado', 'Localidad', 'Viaje', 'Fecha', 'Horarios', 'CP', 'Ciudad', 'Colonia', 'Calle', 'Número', 'Teléfono', 'Comentario', 'Destino temporal'];
   const filas = [...cuerpoTablaMasivo.rows].map(fila => {
     const celdas = Array.from(fila.cells).slice(0, -1);
     return '<tr>' + celdas.map(celda => `<td>${escaparHtml(textoCeldaMasiva(celda))}</td>`).join('') + '</tr>';
@@ -682,7 +684,7 @@ function htmlTablaMasiva() {
 }
 
 function csvMasiva() {
-  const encabezados = ['No. Empleado', 'Nombre del empleado', 'Localidad', 'Viaje', 'Fecha', 'Horarios', 'CP', 'Ciudad', 'Colonia', 'Calle', 'Número', 'Teléfono', 'Comentario'];
+  const encabezados = ['No. Empleado', 'Nombre del empleado', 'Localidad', 'Viaje', 'Fecha', 'Horarios', 'CP', 'Ciudad', 'Colonia', 'Calle', 'Número', 'Teléfono', 'Comentario', 'Destino temporal'];
   const filas = [...cuerpoTablaMasivo.rows].map(fila => {
     const celdas = Array.from(fila.cells).slice(0, -1);
     return celdas.map(celda => `"${textoCeldaMasiva(celda).replace(/"/g, '""')}"`).join(',');
@@ -738,10 +740,10 @@ async function registrarSolicitud(payload) {
       }))
     : [{
         id: `individual-${Date.now()}`,
-        tipoServicio: 'Individual',
+        tipoServicio: payload.datos?.localidad === 'Temporal' ? 'Temporal' : 'Individual',
         nombre: payload.datos?.nombreEmp || 'Cliente',
         programador: usuarioActual?.nombre || '',
-        localidad: payload.datos?.viaje === 'Temporal' ? 'Temporal' : (payload.datos?.localidad || ''),
+        localidad: payload.datos?.localidad || '',
         viaje: payload.datos?.viaje || '',
         ...coordenadasDePlanta(payload.datos?.localidad),
         fechaEntrada: payload.datos?.fechaEntrada || '',
@@ -1686,6 +1688,7 @@ function crearFilaMasiva(valores = {}) {
       select.dataset.localidadSelect = 'true';
       select.add(new Option('Seleccione...', ''));
       obtenerLocalidades().filter(item => item.activo !== false).forEach(item => select.add(new Option(item.nombre, item.id)));
+      select.add(new Option('Domicilio temporal · punto a punto', 'Temporal'));
       select.value = valores.localidad || '';
       celda.appendChild(select);
     } else if (columna === 'viaje') {
@@ -1799,6 +1802,7 @@ servicioSelect.addEventListener('change', () => {
 });
 
 document.getElementById('viaje').addEventListener('change', actualizarCamposDeViaje);
+document.getElementById('localidad').addEventListener('change', actualizarCamposDeViaje);
 actualizarCamposDeViaje();
 
 cpInput.addEventListener('input', event => {
