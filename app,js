@@ -17,7 +17,6 @@ const mapaIframeMasivo = document.getElementById('mapaIframeMasivo');
 const linkGoogleMapsMasivo = document.getElementById('linkGoogleMapsMasivo');
 const direccionMasiva = document.getElementById('direccionMasiva');
 const columnasMasivas = ['numEmp', 'nombreEmp', 'localidad', 'viaje', 'fecha', 'horarios', 'cp', 'ciudad', 'colonia', 'calle', 'numero', 'telefono', 'comentario'];
-const ADMIN_CREDENTIALS = { username: 'admin', password: 'admin123' };
 const STORAGE_KEY = 'taxiRequestsLocalTest';
 const USERS_STORAGE_KEY = 'taxiSchedulingUsers';
 const DRIVERS_STORAGE_KEY = 'taxiDrivers';
@@ -57,9 +56,11 @@ const tablaChoferes = document.getElementById('tablaChoferes');
 const formularioAltaUsuario = document.getElementById('formularioAltaUsuario');
 const formularioAltaChofer = document.getElementById('formularioAltaChofer');
 const API_BASE_URL = String(window.TAXI_API_BASE_URL || '').replace(/\/$/, '');
+const TAXI_FIREBASE = window.taxiFirebase;
 let usuarioActual = null;
 let gruposRutasActuales = [];
 let solicitudesProgramacionActuales = [];
+let firestoreUnsubscribers = [];
 
 function apiFetch(path, opciones) {
   return fetch(`${API_BASE_URL}${path}`, opciones);
@@ -272,6 +273,103 @@ function obtenerAsignacionesRutas() {
   return asignaciones && typeof asignaciones === 'object' && !Array.isArray(asignaciones) ? asignaciones : {};
 }
 
+function detenerEscuchaFirestore() {
+  firestoreUnsubscribers.forEach(desuscribir => desuscribir());
+  firestoreUnsubscribers = [];
+}
+
+function actualizarCacheFirestore(clave, valores) {
+  localStorage.setItem(clave, JSON.stringify(valores));
+}
+
+async function importarColeccionFirestore(nombre, documentos) {
+  const db = TAXI_FIREBASE.db;
+  for (let inicio = 0; inicio < documentos.length; inicio += 450) {
+    const batch = db.batch();
+    documentos.slice(inicio, inicio + 450).forEach(documento => {
+      const { id, ...datos } = documento;
+      batch.set(db.collection(nombre).doc(String(id)), datos, { merge: true });
+    });
+    await batch.commit();
+  }
+}
+
+async function migrarAlmacenamientoLocal() {
+  let idNavegador = localStorage.getItem('taxiFirebaseMigrationId');
+  if (!idNavegador) {
+    idNavegador = window.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem('taxiFirebaseMigrationId', idNavegador);
+  }
+  const migracion = TAXI_FIREBASE.db.collection('migrations').doc(`local-storage-v1-${idNavegador}`);
+  if ((await migracion.get()).exists) return;
+
+  const db = TAXI_FIREBASE.db;
+  const solicitudesLocales = obtenerSolicitudesGuardadas().filter(solicitud => !String(solicitud.id).startsWith('demo-'));
+  await importarColeccionFirestore('requests', solicitudesLocales);
+  await importarColeccionFirestore('drivers', obtenerChoferes());
+  const operadoresLocales = obtenerUsuariosProgramadores().map(operador => {
+    const perfil = { ...operador };
+    delete perfil.password;
+    return { ...perfil, id: `legacy-${String(operador.id)}`, estatus: 'Requiere crear acceso' };
+  });
+  await importarColeccionFirestore('operators', operadoresLocales);
+
+  const asignacionesDoc = db.collection('settings').doc('routeAssignments');
+  if (!(await asignacionesDoc.get()).exists) {
+    await asignacionesDoc.set({ asignaciones: obtenerAsignacionesRutas() });
+  }
+
+  await migracion.set({ completada: true, fecha: firebase.firestore.FieldValue.serverTimestamp() });
+}
+
+function refrescarVistasFirestore() {
+  if (!usuarioActual || adminDashboard.classList.contains('hidden')) return;
+  if (usuarioActual.rol === 'admin') renderUsuariosAdmin();
+  renderChoferesAdmin();
+  renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la programación:', error));
+}
+
+function iniciarEscuchasFirestore() {
+  detenerEscuchaFirestore();
+  const db = TAXI_FIREBASE.db;
+  firestoreUnsubscribers.push(db.collection('requests').onSnapshot(snapshot => {
+    actualizarCacheFirestore(STORAGE_KEY, snapshot.docs.map(documento => ({ id: documento.id, ...documento.data() })));
+    refrescarVistasFirestore();
+  }));
+  firestoreUnsubscribers.push(db.collection('drivers').onSnapshot(snapshot => {
+    actualizarCacheFirestore(DRIVERS_STORAGE_KEY, snapshot.docs.map(documento => ({ id: documento.id, ...documento.data() })));
+    refrescarVistasFirestore();
+  }));
+  firestoreUnsubscribers.push(db.collection('settings').doc('routeAssignments').onSnapshot(snapshot => {
+    actualizarCacheFirestore(ROUTE_ASSIGNMENTS_STORAGE_KEY, snapshot.data()?.asignaciones || {});
+    refrescarVistasFirestore();
+  }));
+  if (usuarioActual?.rol === 'admin') {
+    firestoreUnsubscribers.push(db.collection('operators').onSnapshot(snapshot => {
+      actualizarCacheFirestore(USERS_STORAGE_KEY, snapshot.docs.map(documento => ({ id: documento.id, ...documento.data() })));
+      renderUsuariosAdmin();
+    }));
+  }
+}
+
+async function cargarDatosFirestore() {
+  if (usuarioActual?.rol === 'admin') await migrarAlmacenamientoLocal();
+  const db = TAXI_FIREBASE.db;
+  const [solicitudes, choferes, asignaciones] = await Promise.all([
+    db.collection('requests').get(),
+    db.collection('drivers').get(),
+    db.collection('settings').doc('routeAssignments').get()
+  ]);
+  actualizarCacheFirestore(STORAGE_KEY, solicitudes.docs.map(documento => ({ id: documento.id, ...documento.data() })));
+  actualizarCacheFirestore(DRIVERS_STORAGE_KEY, choferes.docs.map(documento => ({ id: documento.id, ...documento.data() })));
+  actualizarCacheFirestore(ROUTE_ASSIGNMENTS_STORAGE_KEY, asignaciones.data()?.asignaciones || {});
+  if (usuarioActual?.rol === 'admin') {
+    const operadores = await db.collection('operators').get();
+    actualizarCacheFirestore(USERS_STORAGE_KEY, operadores.docs.map(documento => ({ id: documento.id, ...documento.data() })));
+  }
+  iniciarEscuchasFirestore();
+}
+
 function solicitudEstaVigente(solicitud) {
   const fechaHora = new Date(`${solicitud.fecha || ''}T${solicitud.hora || ''}`).getTime();
   return Number.isFinite(fechaHora) && fechaHora >= Date.now();
@@ -440,13 +538,18 @@ function obtenerSolicitudesGuardadas() {
 
 function guardarSolicitudes(solicitudes) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(solicitudes));
+  if (usuarioActual && TAXI_FIREBASE.auth.currentUser) {
+    Promise.all(solicitudes.map(solicitud => (
+      TAXI_FIREBASE.db.collection('requests').doc(String(solicitud.id)).set(solicitud)
+    ))).catch(error => console.error('No se pudieron guardar los cambios en Firestore:', error));
+  }
 }
 
 function coordenadasDePlanta(localidad) {
   return COORDENADAS_PLANTAS[String(localidad || '').trim()] || {};
 }
 
-function registrarSolicitud(payload) {
+async function registrarSolicitud(payload) {
   const solicitudes = obtenerSolicitudesGuardadas();
   const registros = payload.tipoServicio === 'Masivo'
     ? (payload.solicitudes || []).map((item, index) => ({
@@ -496,7 +599,11 @@ function registrarSolicitud(payload) {
         comentario: payload.datos?.comentario || ''
       }];
 
-  guardarSolicitudes([...solicitudes, ...registros]);
+  const usuarioAutenticado = await TAXI_FIREBASE.ensureSession();
+  if (!usuarioAutenticado) throw new Error('No se pudo iniciar la sesión anónima de Firebase.');
+  const db = TAXI_FIREBASE.db;
+  await Promise.all(registros.map(registro => db.collection('requests').doc(registro.id).set(registro)));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify([...solicitudes, ...registros]));
   return registros;
 }
 
@@ -862,9 +969,12 @@ function renderUsuariosAdmin() {
       <td class="px-3 py-2 font-semibold">${escaparHtml(usuario.nombre)}</td>
       <td class="px-3 py-2">${escaparHtml(usuario.usuario)}</td>
       <td class="px-3 py-2">${escaparHtml(usuario.telefono)}</td>
-      <td class="px-3 py-2"><button type="button" data-eliminar-usuario="${escaparHtml(usuario.id)}" class="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50">Eliminar</button></td>
+      <td class="px-3 py-2">${escaparHtml(usuario.estatus || 'Activo')}</td>
+      <td class="px-3 py-2">${String(usuario.id).startsWith('legacy-')
+        ? `<button type="button" data-eliminar-usuario="${escaparHtml(usuario.id)}" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50">Quitar perfil</button>`
+        : `<button type="button" data-toggle-usuario="${escaparHtml(usuario.id)}" class="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50">${usuario.estatus === 'Activo' ? 'Desactivar' : 'Reactivar'}</button>`}</td>
     </tr>
-  `).join('') || '<tr><td colspan="4" class="px-3 py-5 text-center text-slate-500">Aún no hay usuarios programadores.</td></tr>';
+  `).join('') || '<tr><td colspan="5" class="px-3 py-5 text-center text-slate-500">Aún no hay usuarios programadores.</td></tr>';
 }
 
 function renderChoferesAdmin() {
@@ -882,27 +992,36 @@ function renderChoferesAdmin() {
   `).join('') || '<tr><td colspan="6" class="px-3 py-5 text-center text-slate-500">Aún no hay choferes registrados.</td></tr>';
 }
 
-function registrarUsuarioProgramador(event) {
+async function registrarUsuarioProgramador(event) {
   event.preventDefault();
   if (usuarioActual?.rol !== 'admin') return;
   const nombre = document.getElementById('usuarioNombre').value.trim();
-  const usuario = document.getElementById('usuarioLogin').value.trim();
+  const usuario = document.getElementById('usuarioLogin').value.trim().toLowerCase();
   const password = document.getElementById('usuarioPassword').value;
   const telefono = document.getElementById('usuarioTelefono').value.trim();
   const usuarios = obtenerUsuariosProgramadores();
-  if (usuario.toLowerCase() === ADMIN_CREDENTIALS.username || usuarios.some(item => item.usuario.toLowerCase() === usuario.toLowerCase())) {
-    mostrarEstadoAlta('mensajeAltaUsuario', 'Ese nombre de usuario ya está registrado.', true);
+  if (usuarios.some(item => item.usuario?.toLowerCase() === usuario)) {
+    mostrarEstadoAlta('mensajeAltaUsuario', 'Ese correo ya está registrado.', true);
     return;
   }
 
-  usuarios.push({ id: crearIdLocal('usuario'), nombre, usuario, password, telefono, estatus: 'Activo' });
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(usuarios));
-  formularioAltaUsuario.reset();
-  renderUsuariosAdmin();
-  mostrarEstadoAlta('mensajeAltaUsuario', 'Usuario programador registrado.');
+  try {
+    const id = await TAXI_FIREBASE.createOperatorAccount(usuario, password);
+    const operador = { id, nombre, usuario, telefono, estatus: 'Activo' };
+    await TAXI_FIREBASE.db.collection('operators').doc(id).set(operador);
+    actualizarCacheFirestore(USERS_STORAGE_KEY, [...usuarios, operador]);
+    formularioAltaUsuario.reset();
+    renderUsuariosAdmin();
+    mostrarEstadoAlta('mensajeAltaUsuario', 'Usuario programador registrado.');
+  } catch (error) {
+    console.error('No se pudo crear el usuario programador:', error);
+    mostrarEstadoAlta('mensajeAltaUsuario', error.code === 'auth/email-already-in-use'
+      ? 'Ese correo ya tiene una cuenta de acceso.'
+      : 'No se pudo crear la cuenta. Verifica la conexión y los permisos de Firebase.', true);
+  }
 }
 
-function registrarChofer(event) {
+async function registrarChofer(event) {
   event.preventDefault();
   if (usuarioActual?.rol !== 'admin') return;
   const chofer = {
@@ -921,31 +1040,67 @@ function registrarChofer(event) {
     venceSeguro: document.getElementById('choferVenceSeguro').value,
     estatus: document.getElementById('choferEstatus').value
   };
-  localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify([...obtenerChoferes(), chofer]));
-  formularioAltaChofer.reset();
-  renderChoferesAdmin();
-  renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la programación:', error));
-  mostrarEstadoAlta('mensajeAltaChofer', 'Chofer y vehículo registrados.');
+  try {
+    await TAXI_FIREBASE.db.collection('drivers').doc(chofer.id).set(chofer);
+    actualizarCacheFirestore(DRIVERS_STORAGE_KEY, [...obtenerChoferes(), chofer]);
+    formularioAltaChofer.reset();
+    renderChoferesAdmin();
+    renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la programación:', error));
+    mostrarEstadoAlta('mensajeAltaChofer', 'Chofer y vehículo registrados.');
+  } catch (error) {
+    console.error('No se pudo guardar el chofer:', error);
+    mostrarEstadoAlta('mensajeAltaChofer', 'No se pudo guardar el chofer en Firebase.', true);
+  }
 }
 
-function eliminarUsuarioProgramador(id) {
+async function eliminarUsuarioProgramador(id) {
   if (usuarioActual?.rol !== 'admin') return;
-  const usuarios = obtenerUsuariosProgramadores().filter(usuario => usuario.id !== id);
-  localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(usuarios));
-  renderUsuariosAdmin();
+  if (!String(id).startsWith('legacy-')) return;
+  try {
+    await TAXI_FIREBASE.db.collection('operators').doc(id).delete();
+    actualizarCacheFirestore(USERS_STORAGE_KEY, obtenerUsuariosProgramadores().filter(usuario => usuario.id !== id));
+    renderUsuariosAdmin();
+  } catch (error) {
+    console.error('No se pudo eliminar el usuario:', error);
+    alert('No se pudo eliminar el usuario programador en Firebase.');
+  }
 }
 
-function eliminarChofer(id) {
+async function cambiarEstadoUsuarioProgramador(id) {
+  if (usuarioActual?.rol !== 'admin') return;
+  const usuario = obtenerUsuariosProgramadores().find(item => item.id === id);
+  if (!usuario || String(id).startsWith('legacy-')) return;
+  const estatus = usuario.estatus === 'Activo' ? 'Inactivo' : 'Activo';
+  try {
+    await TAXI_FIREBASE.db.collection('operators').doc(id).update({ estatus });
+    actualizarCacheFirestore(USERS_STORAGE_KEY, obtenerUsuariosProgramadores().map(item => (
+      item.id === id ? { ...item, estatus } : item
+    )));
+    renderUsuariosAdmin();
+  } catch (error) {
+    console.error('No se pudo cambiar el estado del usuario:', error);
+    alert('No se pudo actualizar el estado del usuario en Firebase.');
+  }
+}
+
+async function eliminarChofer(id) {
   if (usuarioActual?.rol !== 'admin') return;
   const choferes = obtenerChoferes().filter(chofer => chofer.id !== id);
-  localStorage.setItem(DRIVERS_STORAGE_KEY, JSON.stringify(choferes));
   const asignaciones = obtenerAsignacionesRutas();
   Object.keys(asignaciones).forEach(clave => {
     if (asignaciones[clave] === id) delete asignaciones[clave];
   });
-  localStorage.setItem(ROUTE_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(asignaciones));
-  renderChoferesAdmin();
-  renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la programación:', error));
+  try {
+    await TAXI_FIREBASE.db.collection('drivers').doc(id).delete();
+    await TAXI_FIREBASE.db.collection('settings').doc('routeAssignments').set({ asignaciones });
+    actualizarCacheFirestore(DRIVERS_STORAGE_KEY, choferes);
+    actualizarCacheFirestore(ROUTE_ASSIGNMENTS_STORAGE_KEY, asignaciones);
+    renderChoferesAdmin();
+    renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la programación:', error));
+  } catch (error) {
+    console.error('No se pudo eliminar el chofer:', error);
+    alert('No se pudo eliminar el chofer en Firebase.');
+  }
 }
 
 async function renderSolicitudesAdmin() {
@@ -1155,41 +1310,61 @@ function mostrarVistaAdmin(vista) {
   });
 }
 
-function iniciarSesionAdmin() {
-  const usuario = adminUsuario.value.trim();
-  const password = adminPassword.value;
-  const esAdministrador = usuario === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password;
-  const cuentaUsuario = obtenerUsuariosProgramadores().find(item => (
-    item.usuario.toLowerCase() === usuario.toLowerCase()
-    && item.password === password
-    && item.estatus === 'Activo'
-  ));
-
-  if (!esAdministrador && !cuentaUsuario) {
-    alert('Credenciales incorrectas o cuenta inactiva.');
-    return;
+async function abrirPanelFirebase(usuarioFirebase) {
+  let perfil;
+  if (usuarioFirebase.uid === TAXI_FIREBASE.adminUid) {
+    perfil = { nombre: 'Administrador', usuario: usuarioFirebase.email || '', rol: 'admin' };
+  } else {
+    const operador = await TAXI_FIREBASE.db.collection('operators').doc(usuarioFirebase.uid).get();
+    if (!operador.exists || operador.data().estatus !== 'Activo') {
+      await TAXI_FIREBASE.auth.signOut();
+      await TAXI_FIREBASE.auth.signInAnonymously();
+      throw new Error('La cuenta no está autorizada o se encuentra inactiva.');
+    }
+    perfil = { ...operador.data(), rol: 'programador' };
   }
 
-  usuarioActual = esAdministrador
-    ? { nombre: 'Administrador', usuario: 'admin', rol: 'admin' }
-    : { nombre: cuentaUsuario.nombre, usuario: cuentaUsuario.usuario, rol: 'programador' };
+  usuarioActual = perfil;
+  await cargarDatosFirestore();
   adminLoginBox.classList.add('hidden');
   adminDashboard.classList.remove('hidden');
   adminPortal.classList.remove('hidden');
   document.querySelectorAll('[data-solo-admin]').forEach(elemento => elemento.classList.toggle('hidden', usuarioActual.rol !== 'admin'));
   document.getElementById('sesionUsuarioNombre').textContent = usuarioActual.nombre;
-  renderUsuariosAdmin();
+  if (usuarioActual.rol === 'admin') renderUsuariosAdmin();
   renderChoferesAdmin();
   mostrarVistaAdmin('programacion');
   renderSolicitudesAdmin().catch(error => console.error('No se pudo cargar la asignación de rutas:', error));
 }
 
-function cerrarSesionAdmin() {
+async function iniciarSesionAdmin() {
+  try {
+    const credential = await TAXI_FIREBASE.auth.signInWithEmailAndPassword(
+      adminUsuario.value.trim(),
+      adminPassword.value
+    );
+    await abrirPanelFirebase(credential.user);
+  } catch (error) {
+    console.error('No se pudo iniciar sesión:', error);
+    alert(error.message || 'No se pudo iniciar sesión. Verifica el correo y la contraseña.');
+  }
+}
+
+async function cerrarSesionAdmin() {
+  detenerEscuchaFirestore();
   usuarioActual = null;
   adminUsuario.value = '';
   adminPassword.value = '';
   adminLoginBox.classList.remove('hidden');
   adminDashboard.classList.add('hidden');
+  [STORAGE_KEY, DRIVERS_STORAGE_KEY, USERS_STORAGE_KEY, ROUTE_ASSIGNMENTS_STORAGE_KEY]
+    .forEach(clave => localStorage.removeItem(clave));
+  try {
+    await TAXI_FIREBASE.auth.signOut();
+    await TAXI_FIREBASE.auth.signInAnonymously();
+  } catch (error) {
+    console.error('No se pudo regresar a la sesión anónima:', error);
+  }
 }
 
 function parsearFilasDelimitadas(texto) {
@@ -1530,18 +1705,26 @@ document.getElementById('btnMostrarPendientes').addEventListener('click', () => 
 tablaUsuarios.addEventListener('click', event => {
   const boton = event.target.closest('[data-eliminar-usuario]');
   if (boton) eliminarUsuarioProgramador(boton.dataset.eliminarUsuario);
+  const botonEstado = event.target.closest('[data-toggle-usuario]');
+  if (botonEstado) cambiarEstadoUsuarioProgramador(botonEstado.dataset.toggleUsuario);
 });
 tablaChoferes.addEventListener('click', event => {
   const boton = event.target.closest('[data-eliminar-chofer]');
   if (boton) eliminarChofer(boton.dataset.eliminarChofer);
 });
-gruposRutasAdmin.addEventListener('change', event => {
+gruposRutasAdmin.addEventListener('change', async event => {
   const selector = event.target.closest('[data-asignar-ruta]');
   if (!selector) return;
   const asignaciones = obtenerAsignacionesRutas();
   if (selector.value) asignaciones[selector.dataset.asignarRuta] = selector.value;
   else delete asignaciones[selector.dataset.asignarRuta];
-  localStorage.setItem(ROUTE_ASSIGNMENTS_STORAGE_KEY, JSON.stringify(asignaciones));
+  try {
+    await TAXI_FIREBASE.db.collection('settings').doc('routeAssignments').set({ asignaciones });
+    actualizarCacheFirestore(ROUTE_ASSIGNMENTS_STORAGE_KEY, asignaciones);
+  } catch (error) {
+    console.error('No se pudo guardar la asignación:', error);
+    alert('No se pudo guardar la asignación de ruta en Firebase.');
+  }
   renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la asignación:', error));
 });
 adminPassword.addEventListener('keydown', event => {
@@ -1558,14 +1741,26 @@ form.addEventListener('submit', event => {
   const payload = esMasivo
     ? { tipoServicio: 'Masivo', solicitudes: [...cuerpoTablaMasivo.rows].map(fila => ({ ...valoresDeFila(fila), ligaGoogleMaps: fila.dataset.urlMapa || enlacesDeDireccion([valoresDeFila(fila).calle, valoresDeFila(fila).numero, valoresDeFila(fila).colonia, valoresDeFila(fila).ciudad, valoresDeFila(fila).cp, 'México'].filter(Boolean).join(', ')).googleMaps })) }
     : { tipoServicio: 'Individual', ligaGoogleMaps: btnEnviar.dataset.urlMapa || '', datos: valoresIndividuales() };
-  registrarSolicitud(payload);
-  if (adminDashboard && !adminDashboard.classList.contains('hidden')) {
-    renderSolicitudesAdmin();
-  }
-  btnEnviar.textContent = 'Solicitud guardada para pruebas';
   btnEnviar.disabled = true;
+  btnEnviar.textContent = 'Guardando solicitud...';
+  registrarSolicitud(payload).then(() => {
+    if (adminDashboard && !adminDashboard.classList.contains('hidden')) renderSolicitudesAdmin();
+    btnEnviar.textContent = 'Solicitud guardada';
+  }).catch(error => {
+    console.error('No se pudo guardar la solicitud:', error);
+    alert('No se pudo guardar la solicitud. Verifica tu conexión e inténtalo de nuevo.');
+    btnEnviar.textContent = 'Confirmar solicitud';
+    btnEnviar.disabled = false;
+  });
 });
 
-crearSolicitudesDemo();
 crearFilaMasiva();
 cargarCp().catch(error => console.error(error));
+TAXI_FIREBASE.ready.then(usuarioFirebase => {
+  if (!usuarioFirebase.isAnonymous) {
+    abrirPanelFirebase(usuarioFirebase).catch(error => {
+      console.error('No se pudo restaurar la sesión de Firebase:', error);
+      alert('No se pudo restaurar la sesión. Inicia sesión de nuevo.');
+    });
+  }
+}).catch(error => console.error('No se pudo iniciar Firebase Authentication:', error));

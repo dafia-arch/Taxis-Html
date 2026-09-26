@@ -1,0 +1,51 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.uid == 'xW9j182ayrcB0xyIrCOn84SRtBN2';
+    }
+
+    function isActiveOperator() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/operators/$(request.auth.uid))
+        && get(/databases/$(database)/documents/operators/$(request.auth.uid)).data.estatus == 'Activo';
+    }
+
+    function canManageOperations() {
+      return isAdmin() || isActiveOperator();
+    }
+
+    match /requests/{requestId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasAll(['id', 'nombre', 'fecha', 'hora', 'direccion'])
+        && request.resource.data.id == requestId
+        && request.resource.data.nombre is string
+        && request.resource.data.direccion is string;
+      allow read, update, delete: if canManageOperations();
+    }
+
+    match /drivers/{driverId} {
+      allow read: if canManageOperations();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /operators/{operatorId} {
+      allow get: if isAdmin() || (signedIn() && request.auth.uid == operatorId);
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if canManageOperations();
+    }
+
+    match /migrations/{migrationId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

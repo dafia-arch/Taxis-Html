@@ -213,15 +213,15 @@
         </div>
         <div class="space-y-4">
           <label class="block">
-            <span class="mb-1 block text-sm font-medium text-slate-700">Usuario</span>
-            <input id="adminUsuario" type="text" class="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="admin" />
+            <span class="mb-1 block text-sm font-medium text-slate-700">Correo electrónico</span>
+            <input id="adminUsuario" type="email" autocomplete="username" class="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="admin@empresa.com" />
           </label>
           <label class="block">
             <span class="mb-1 block text-sm font-medium text-slate-700">Contraseña</span>
             <input id="adminPassword" type="password" class="w-full rounded-2xl border border-slate-300 bg-white px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100" placeholder="••••••••" />
           </label>
           <button id="btnLoginAdmin" type="button" class="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-slate-700">Entrar al panel</button>
-          <p class="text-center text-xs text-slate-500">Administrador demo: <strong>admin</strong> / <strong>admin123</strong>. Los programadores ingresan con su cuenta registrada.</p>
+          <p class="text-center text-xs text-slate-500">Acceso para administrador y programadores registrados en Firebase.</p>
         </div>
       </div>
 
@@ -323,8 +323,8 @@
             <label class="text-sm font-semibold text-slate-700">Nombre completo
               <input id="usuarioNombre" required class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" autocomplete="name">
             </label>
-            <label class="text-sm font-semibold text-slate-700">Usuario de acceso
-              <input id="usuarioLogin" required class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" autocomplete="username">
+            <label class="text-sm font-semibold text-slate-700">Correo de acceso
+              <input id="usuarioLogin" type="email" required class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" autocomplete="username">
             </label>
             <label class="text-sm font-semibold text-slate-700">Contraseña (mínimo 8 caracteres)
               <input id="usuarioPassword" type="password" required minlength="8" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" autocomplete="new-password">
@@ -339,7 +339,7 @@
           </form>
           <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table class="min-w-full text-left text-sm">
-              <thead class="bg-slate-100 text-xs uppercase text-slate-600"><tr><th class="px-3 py-2">Nombre</th><th class="px-3 py-2">Usuario</th><th class="px-3 py-2">Teléfono</th><th class="px-3 py-2">Acción</th></tr></thead>
+              <thead class="bg-slate-100 text-xs uppercase text-slate-600"><tr><th class="px-3 py-2">Nombre</th><th class="px-3 py-2">Correo</th><th class="px-3 py-2">Teléfono</th><th class="px-3 py-2">Estado</th><th class="px-3 py-2">Acción</th></tr></thead>
               <tbody id="tablaUsuarios"></tbody>
             </table>
           </div>
@@ -425,6 +425,10 @@
   <!-- Define window.TAXI_API_BASE_URL con la URL pública del backend antes de app,js. -->
   <script>window.TAXI_API_BASE_URL = 'https://taxis-html.onrender.com';</script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="firebase-config.js"></script>
   <script src="app,js"></script>
 </body>
 </html>

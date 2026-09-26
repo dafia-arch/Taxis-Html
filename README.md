@@ -70,13 +70,17 @@ El alta de chofer contempla teléfono, número y tipo de licencia, vencimiento d
 - A menos de 4 horas de la entrada programada, una solicitud deja de agregarse a un grupo existente y forma uno nuevo.
 - Los reportes incluyen una liga de Google Maps con las paradas en el orden de la ruta. La vista administrativa permite recalcular rutas con LocationIQ.
 
-## Almacenamiento y seguridad
+## Firebase
 
-Las solicitudes, usuarios, choferes y asignaciones se guardan en `localStorage` del navegador. Esto significa que los datos no se comparten entre navegadores o dispositivos y no existe una base de datos ni un servicio de autenticación.
+La app usa Cloud Firestore para solicitudes (`requests`), choferes (`drivers`), programadores (`operators`) y asignaciones (`settings/routeAssignments`). El SDK web se carga desde CDN; no requiere `npm install firebase` ni Firebase Hosting.
 
-Las credenciales de usuarios programadores también se guardan en el navegador y la contraseña de demostración del administrador está en el código cliente. Este mecanismo sirve solo para pruebas: no protege información personal ni debe usarse en producción con credenciales reales. Para un despliegue real se necesita autenticación en backend y almacenamiento persistente protegido.
+En Firebase Authentication deben estar habilitados **Anónimo** y **Correo electrónico/contraseña**. Las solicitudes pueden enviarse con una sesión anónima; el panel exige una cuenta activa. El UID del administrador debe coincidir en `firebase-config.js` y `firestore.rules`. Publica en Firebase Console las reglas de ese archivo antes de probar operaciones; las reglas predeterminadas que deniegan todo no permitirán guardar ni consultar.
 
-El token de LocationIQ debe permanecer en `LOCATIONIQ_TOKEN` del servidor. No lo incluyas en `app,js`, `index.html` ni otros archivos públicos. Si un token ya fue expuesto, revócalo y crea uno nuevo.
+Agrega el dominio del sitio a **Authentication → Configuración → Dominios autorizados**. Para la publicación actual, agrega `taxis-html.onrender.com`; `localhost` suele estar autorizado para pruebas locales.
+
+En el primer acceso del administrador, cada navegador migra una sola vez sus datos locales no-demo a Firestore. Se excluyen las solicitudes `demo-*`. Los perfiles de programadores antiguos se migran sin contraseñas y requieren crear de nuevo sus accesos en Firebase Authentication. Las cachés de geocodificación y distancias permanecen locales.
+
+Los datos del SDK web (incluida `apiKey`) identifican la aplicación, no son una clave privada; la protección depende de las reglas de Firestore. No publiques una clave de cuenta de servicio. El token de LocationIQ debe permanecer en `LOCATIONIQ_TOKEN` del servidor. Si un token ya fue expuesto, revócalo y crea uno nuevo.
 
 ## API HTTP
 
