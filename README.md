@@ -44,6 +44,8 @@ Sin `LOCATIONIQ_TOKEN`, la interfaz puede abrirse, pero las operaciones de geoco
 
 - **Individual:** captura empleado, localidad (planta 3A o 3B), tipo de viaje, fecha y horario, teléfono y domicilio.
 - **Masivo:** agrega filas o pega una tabla desde el portapapeles. Permite descargar la captura masiva en CSV.
+- **Localidades:** el administrador puede agregar, activar o desactivar puntos de llegada/recolección con identificador, dirección y coordenadas. Las localidades iniciales se cargan desde `localidades.json` y se sincronizan en Firebase mediante `settings/localidades`.
+- **Domicilio temporal:** selecciona este tipo para capturar un traslado punto a punto. Usa el domicilio de origen y los campos adicionales de destino, con fecha, hora, teléfono y comentario; no solicita nombre ni número de empleado.
 - El catálogo `cp_mexico.json` ayuda a completar ciudad y colonias a partir del código postal.
 - No se aceptan fechas ni horarios pasados. Los viajes Redondos requieren entrada y salida en orden cronológico, con una duración máxima de 12 horas. Los mensajes de validación se muestran al enviar.
 

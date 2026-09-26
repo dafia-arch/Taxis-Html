@@ -21,6 +21,7 @@ const STORAGE_KEY = 'taxiRequestsLocalTest';
 const USERS_STORAGE_KEY = 'taxiSchedulingUsers';
 const DRIVERS_STORAGE_KEY = 'taxiDrivers';
 const ROUTE_ASSIGNMENTS_STORAGE_KEY = 'taxiRouteAssignments';
+const LOCALIDADES_STORAGE_KEY = 'taxiLocalidades';
 const MAX_ROUTE_DISTANCE_KM = 10;
 const MAX_ROUTE_SIZE = 4;
 const TIME_WINDOW_MINUTES = 30;
@@ -31,10 +32,7 @@ const MENSAJES_PROGRAMACION = {
   turno: '🚨 INFRACCIÓN AVT / LÍMITE LABORAL\n\n¡Variante! La línea temporal se rompió: la salida no puede estar en el pasado, y el turno no puede exceder las 12 horas. Corrige el horario o los Minuteros auditarán la planta.'
 };
 const ROUTE_DISTANCE_CACHE_KEY = 'taxiRouteDistanceCache';
-const COORDENADAS_PLANTAS = {
-  '3A': { plantaLat: 25.5887676, plantaLon: -100.8938679 },
-  '3B': { plantaLat: 25.5850267, plantaLon: -100.8996309 }
-};
+let localidadesCatalogo = [];
 const adminPortal = document.getElementById('adminPortal');
 const adminLoginBox = document.getElementById('adminLoginBox');
 const adminDashboard = document.getElementById('adminDashboard');
@@ -55,8 +53,11 @@ const tablaUsuarios = document.getElementById('tablaUsuarios');
 const tablaChoferes = document.getElementById('tablaChoferes');
 const formularioAltaUsuario = document.getElementById('formularioAltaUsuario');
 const formularioAltaChofer = document.getElementById('formularioAltaChofer');
+const tablaLocalidades = document.getElementById('tablaLocalidades');
+const formularioAltaLocalidad = document.getElementById('formularioAltaLocalidad');
 const API_BASE_URL = String(window.TAXI_API_BASE_URL || '').replace(/\/$/, '');
 const TAXI_FIREBASE = window.taxiFirebase;
+const ZONA_HORARIA_OPERACION = 'America/Monterrey';
 let usuarioActual = null;
 let gruposRutasActuales = [];
 let solicitudesProgramacionActuales = [];
@@ -67,16 +68,25 @@ function apiFetch(path, opciones) {
 }
 
 function fechaLocal(date = new Date()) {
-  const año = date.getFullYear();
-  const mes = String(date.getMonth() + 1).padStart(2, '0');
-  const dia = String(date.getDate()).padStart(2, '0');
-  return `${año}-${mes}-${dia}`;
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: ZONA_HORARIA_OPERACION,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date).reduce((resultado, parte) => ({ ...resultado, [parte.type]: parte.value }), {});
+  return `${partes.year}-${partes.month}-${partes.day}`;
 }
 
 function horaMinimaLocal(date = new Date()) {
-  const minuto = new Date(date);
-  if (minuto.getSeconds() || minuto.getMilliseconds()) minuto.setMinutes(minuto.getMinutes() + 1);
-  return `${String(minuto.getHours()).padStart(2, '0')}:${String(minuto.getMinutes()).padStart(2, '0')}`;
+  const instante = date.getTime();
+  const minuto = new Date(Math.ceil(instante / 60000) * 60000);
+  const partes = new Intl.DateTimeFormat('en-GB', {
+    timeZone: ZONA_HORARIA_OPERACION,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
+  }).formatToParts(minuto).reduce((resultado, parte) => ({ ...resultado, [parte.type]: parte.value }), {});
+  return `${partes.hour}:${partes.minute}`;
 }
 
 function actualizarMinimosFechaHora(fecha, hora) {
@@ -84,6 +94,21 @@ function actualizarMinimosFechaHora(fecha, hora) {
   fecha.min = hoy;
   if (fecha.value === hoy) hora.min = horaMinimaLocal();
   else hora.removeAttribute('min');
+}
+
+function configurarMinimosFechasIndividuales() {
+  [
+    ['fechaEntrada', 'horaEntrada'],
+    ['fechaSalida', 'horaSalida']
+  ].forEach(([idFecha, idHora]) => {
+    const fecha = document.getElementById(idFecha);
+    const hora = document.getElementById(idHora);
+    const actualizar = () => actualizarMinimosFechaHora(fecha, hora);
+    actualizar();
+    fecha.addEventListener('focus', actualizar);
+    fecha.addEventListener('change', actualizar);
+    hora.addEventListener('focus', actualizar);
+  });
 }
 
 function validarProgramacion(fecha, hora) {
@@ -95,7 +120,7 @@ function validarProgramacion(fecha, hora) {
     fecha.setCustomValidity(MENSAJES_PROGRAMACION.fecha);
     return { control: fecha, tipo: 'fecha' };
   }
-  if (fecha.value && hora.value && new Date(`${fecha.value}T${hora.value}`).getTime() < Date.now()) {
+  if (fecha.value === fechaLocal() && hora.value && hora.value < horaMinimaLocal()) {
     hora.setCustomValidity(MENSAJES_PROGRAMACION.hora);
     return { control: hora, tipo: 'hora' };
   }
@@ -124,7 +149,7 @@ function validarProgramaciones() {
     const horaEntrada = document.getElementById('horaEntrada');
     const fechaSalida = document.getElementById('fechaSalida');
     const horaSalida = document.getElementById('horaSalida');
-    if (viaje === 'Entrada' || viaje === 'Redondo') pares.push([fechaEntrada, horaEntrada]);
+    if (viaje === 'Entrada' || viaje === 'Redondo' || viaje === 'Temporal') pares.push([fechaEntrada, horaEntrada]);
     if (viaje === 'Salida' || viaje === 'Redondo') pares.push([fechaSalida, horaSalida]);
     if (viaje === 'Redondo') redondos.push([fechaEntrada, horaEntrada, fechaSalida, horaSalida]);
   }
@@ -227,6 +252,15 @@ function claveRuta(ruta) {
 
 function ligaGoogleMapsDeRuta(ruta) {
   if (!ruta.length) return '';
+  if (ruta.length === 1 && ruta[0].tipoServicio === 'Temporal' && ruta[0].direccionDestino) {
+    const parametrosTemporales = new URLSearchParams({
+      api: '1',
+      origin: direccionDeSolicitud(ruta[0]),
+      destination: ruta[0].direccionDestino,
+      travelmode: 'driving'
+    });
+    return `https://www.google.com/maps/dir/?${parametrosTemporales.toString()}`;
+  }
   const direcciones = ruta.map(direccionDeSolicitud).filter(Boolean);
   if (!direcciones.length) return '';
 
@@ -271,6 +305,97 @@ function obtenerUsuariosProgramadores() {
 function obtenerAsignacionesRutas() {
   const asignaciones = leerAlmacenamientoLocal(ROUTE_ASSIGNMENTS_STORAGE_KEY, {});
   return asignaciones && typeof asignaciones === 'object' && !Array.isArray(asignaciones) ? asignaciones : {};
+}
+
+function obtenerLocalidades() {
+  return localidadesCatalogo.length
+    ? localidadesCatalogo
+    : leerAlmacenamientoLocal(LOCALIDADES_STORAGE_KEY, []);
+}
+
+function coordenadasDePlanta(localidad) {
+  const datos = obtenerLocalidades().find(item => item.id === String(localidad || '').trim() && item.activo !== false);
+  return datos && Number.isFinite(Number(datos.lat)) && Number.isFinite(Number(datos.lon))
+    ? { plantaLat: Number(datos.lat), plantaLon: Number(datos.lon) }
+    : {};
+}
+
+function renderLocalidadesSelect() {
+  const selectores = [document.getElementById('localidad'), ...document.querySelectorAll('[data-localidad-select]')].filter(Boolean);
+  selectores.forEach(select => {
+    const valor = select.value;
+    select.replaceChildren(new Option('Seleccione...', ''));
+    obtenerLocalidades().filter(item => item.activo !== false).forEach(item => {
+      select.add(new Option(item.nombre, item.id));
+    });
+    if ([...select.options].some(option => option.value === valor)) select.value = valor;
+  });
+}
+
+async function cargarLocalidades() {
+  const locales = leerAlmacenamientoLocal(LOCALIDADES_STORAGE_KEY, []);
+  try {
+    const response = await fetch('localidades.json');
+    if (response.ok) {
+      const iniciales = await response.json();
+      localidadesCatalogo = Array.isArray(locales) && locales.length ? locales : iniciales;
+    } else localidadesCatalogo = locales;
+  } catch (error) {
+    localidadesCatalogo = locales;
+  }
+  localStorage.setItem(LOCALIDADES_STORAGE_KEY, JSON.stringify(localidadesCatalogo));
+  renderLocalidadesSelect();
+}
+
+function renderLocalidadesAdmin() {
+  if (!tablaLocalidades) return;
+  tablaLocalidades.innerHTML = obtenerLocalidades().map(localidad => `
+    <tr class="border-t border-slate-200">
+      <td class="px-3 py-2 font-semibold">${escaparHtml(localidad.id)}</td>
+      <td class="px-3 py-2">${escaparHtml(localidad.nombre)}</td>
+      <td class="px-3 py-2">${escaparHtml(localidad.direccion)}</td>
+      <td class="px-3 py-2">${Number(localidad.lat).toFixed(6)}, ${Number(localidad.lon).toFixed(6)}</td>
+      <td class="px-3 py-2">${localidad.activo === false ? 'Inactiva' : 'Activa'}</td>
+      <td class="px-3 py-2"><button type="button" data-toggle-localidad="${escaparHtml(localidad.id)}" class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-bold text-slate-700">${localidad.activo === false ? 'Activar' : 'Desactivar'}</button></td>
+    </tr>
+  `).join('') || '<tr><td colspan="6" class="px-3 py-5 text-center text-slate-500">No hay localidades.</td></tr>';
+}
+
+async function guardarLocalidadesCatalogo() {
+  localidadesCatalogo = obtenerLocalidades();
+  localStorage.setItem(LOCALIDADES_STORAGE_KEY, JSON.stringify(localidadesCatalogo));
+  if (usuarioActual && TAXI_FIREBASE.auth.currentUser) {
+    await TAXI_FIREBASE.db.collection('settings').doc('localidades').set({ localidades: localidadesCatalogo });
+  }
+  renderLocalidadesSelect();
+  renderLocalidadesAdmin();
+}
+
+async function registrarLocalidad(event) {
+  event.preventDefault();
+  if (usuarioActual?.rol !== 'admin') return;
+  const id = document.getElementById('localidadId').value.trim().toUpperCase();
+  const localidad = {
+    id,
+    nombre: document.getElementById('localidadNombre').value.trim(),
+    direccion: document.getElementById('localidadDireccion').value.trim(),
+    lat: Number(document.getElementById('localidadLat').value),
+    lon: Number(document.getElementById('localidadLon').value),
+    activo: true
+  };
+  if (!id || !localidad.nombre || !Number.isFinite(localidad.lat) || !Number.isFinite(localidad.lon)) {
+    alert('Captura identificador, nombre, dirección y coordenadas válidas.');
+    return;
+  }
+  localidadesCatalogo = [...obtenerLocalidades().filter(item => item.id !== id), localidad];
+  formularioAltaLocalidad.reset();
+  await guardarLocalidadesCatalogo();
+}
+
+async function cambiarEstadoLocalidad(id) {
+  if (usuarioActual?.rol !== 'admin') return;
+  localidadesCatalogo = obtenerLocalidades().map(item => item.id === id ? { ...item, activo: item.activo === false } : item);
+  await guardarLocalidadesCatalogo();
 }
 
 function detenerEscuchaFirestore() {
@@ -327,6 +452,10 @@ async function migrarAlmacenamientoLocal() {
   if (!(await ejecutarPasoFirestore('consultar asignaciones', () => asignacionesDoc.get())).exists) {
     await ejecutarPasoFirestore('guardar asignaciones', () => asignacionesDoc.set({ asignaciones: obtenerAsignacionesRutas() }));
   }
+  const localidadesDoc = db.collection('settings').doc('localidades');
+  if (!(await ejecutarPasoFirestore('consultar localidades', () => localidadesDoc.get())).exists) {
+    await ejecutarPasoFirestore('guardar localidades', () => localidadesDoc.set({ localidades: obtenerLocalidades() }));
+  }
 
   await ejecutarPasoFirestore('guardar marca de migración', () => migracion.set({ completada: true, fecha: firebase.firestore.FieldValue.serverTimestamp() }));
 }
@@ -334,6 +463,7 @@ async function migrarAlmacenamientoLocal() {
 function refrescarVistasFirestore() {
   if (!usuarioActual || adminDashboard.classList.contains('hidden')) return;
   if (usuarioActual.rol === 'admin') renderUsuariosAdmin();
+  if (usuarioActual.rol === 'admin') renderLocalidadesAdmin();
   renderChoferesAdmin();
   renderSolicitudesAdmin().catch(error => console.error('No se pudo actualizar la programación:', error));
 }
@@ -353,6 +483,13 @@ function iniciarEscuchasFirestore() {
     actualizarCacheFirestore(ROUTE_ASSIGNMENTS_STORAGE_KEY, snapshot.data()?.asignaciones || {});
     refrescarVistasFirestore();
   }));
+  firestoreUnsubscribers.push(db.collection('settings').doc('localidades').onSnapshot(snapshot => {
+    if (!snapshot.exists || !Array.isArray(snapshot.data()?.localidades)) return;
+    localidadesCatalogo = snapshot.data().localidades;
+    actualizarCacheFirestore(LOCALIDADES_STORAGE_KEY, localidadesCatalogo);
+    renderLocalidadesSelect();
+    renderLocalidadesAdmin();
+  }));
   if (usuarioActual?.rol === 'admin') {
     firestoreUnsubscribers.push(db.collection('operators').onSnapshot(snapshot => {
       actualizarCacheFirestore(USERS_STORAGE_KEY, snapshot.docs.map(documento => ({ id: documento.id, ...documento.data() })));
@@ -364,14 +501,20 @@ function iniciarEscuchasFirestore() {
 async function cargarDatosFirestore() {
   if (usuarioActual?.rol === 'admin') await migrarAlmacenamientoLocal();
   const db = TAXI_FIREBASE.db;
-  const [solicitudes, choferes, asignaciones] = await Promise.all([
+  const [solicitudes, choferes, asignaciones, localidades] = await Promise.all([
     ejecutarPasoFirestore('leer solicitudes', () => db.collection('requests').get()),
     ejecutarPasoFirestore('leer choferes', () => db.collection('drivers').get()),
-    ejecutarPasoFirestore('leer asignaciones', () => db.collection('settings').doc('routeAssignments').get())
+    ejecutarPasoFirestore('leer asignaciones', () => db.collection('settings').doc('routeAssignments').get()),
+    ejecutarPasoFirestore('leer localidades', () => db.collection('settings').doc('localidades').get())
   ]);
   actualizarCacheFirestore(STORAGE_KEY, solicitudes.docs.map(documento => ({ id: documento.id, ...documento.data() })));
   actualizarCacheFirestore(DRIVERS_STORAGE_KEY, choferes.docs.map(documento => ({ id: documento.id, ...documento.data() })));
   actualizarCacheFirestore(ROUTE_ASSIGNMENTS_STORAGE_KEY, asignaciones.data()?.asignaciones || {});
+  if (localidades.exists && Array.isArray(localidades.data()?.localidades)) {
+    localidadesCatalogo = localidades.data().localidades;
+    actualizarCacheFirestore(LOCALIDADES_STORAGE_KEY, localidadesCatalogo);
+    renderLocalidadesSelect();
+  }
   if (usuarioActual?.rol === 'admin') {
     const operadores = await ejecutarPasoFirestore('leer programadores', () => db.collection('operators').get());
     actualizarCacheFirestore(USERS_STORAGE_KEY, operadores.docs.map(documento => ({ id: documento.id, ...documento.data() })));
@@ -442,7 +585,7 @@ function valoresDeFila(fila) {
 }
 
 function valoresIndividuales() {
-  const ids = ['localidad', 'viaje', 'numEmp', 'nombreEmp', 'fechaEntrada', 'fechaSalida', 'horaEntrada', 'horaSalida', 'cpInput', 'ciudadInput', 'calleInput', 'numeroInput', 'telefono', 'comentario'];
+  const ids = ['localidad', 'viaje', 'numEmp', 'nombreEmp', 'fechaEntrada', 'fechaSalida', 'horaEntrada', 'horaSalida', 'cpInput', 'ciudadInput', 'calleInput', 'numeroInput', 'telefono', 'comentario', 'temporalCp', 'temporalCiudad', 'temporalColonia', 'temporalCalle', 'temporalNumero'];
   const datos = ids.reduce((resultado, id) => {
     resultado[id] = document.getElementById(id).value.trim();
     return resultado;
@@ -453,7 +596,8 @@ function valoresIndividuales() {
 
 function actualizarCamposDeViaje() {
   const viaje = document.getElementById('viaje').value;
-  const entrada = viaje === 'Entrada' || viaje === 'Redondo';
+  const temporal = viaje === 'Temporal';
+  const entrada = viaje === 'Entrada' || viaje === 'Redondo' || temporal;
   const salida = viaje === 'Salida' || viaje === 'Redondo';
   const cambiarVisibilidad = (id, visible) => {
     const elemento = document.getElementById(id);
@@ -466,6 +610,17 @@ function actualizarCamposDeViaje() {
   document.getElementById('horaEntrada').required = entrada;
   document.getElementById('fechaSalida').required = salida;
   document.getElementById('horaSalida').required = salida;
+  document.getElementById('seccionDestinoTemporal').classList.toggle('hidden', !temporal);
+  ['numEmp', 'nombreEmp'].forEach(id => {
+    const campo = document.getElementById(id);
+    campo.closest('label').classList.toggle('hidden', temporal);
+    campo.required = !temporal;
+  });
+  document.getElementById('localidad').closest('label').classList.toggle('hidden', temporal);
+  document.getElementById('localidad').required = !temporal;
+  ['temporalCp', 'temporalCiudad', 'temporalColonia', 'temporalCalle', 'temporalNumero'].forEach(id => {
+    document.getElementById(id).required = temporal;
+  });
 }
 
 function actualizarMapaMasivo(fila) {
@@ -486,7 +641,7 @@ function actualizarMapaMasivo(fila) {
 }
 
 function actualizarCamposDeFila(fila) {
-  const viaje = fila.cells[1].querySelector('select')?.value || '';
+  const viaje = fila.cells[3].querySelector('select')?.value || '';
   const mostrarEntrada = viaje === 'Entrada' || viaje === 'Redondo';
   const mostrarSalida = viaje === 'Salida' || viaje === 'Redondo';
   fila.querySelector('[data-horario="entrada"]').classList.toggle('hidden', !mostrarEntrada);
@@ -554,10 +709,6 @@ function guardarSolicitudes(solicitudes) {
   }
 }
 
-function coordenadasDePlanta(localidad) {
-  return COORDENADAS_PLANTAS[String(localidad || '').trim()] || {};
-}
-
 async function registrarSolicitud(payload) {
   const solicitudes = obtenerSolicitudesGuardadas();
   const registros = payload.tipoServicio === 'Masivo'
@@ -582,14 +733,15 @@ async function registrarSolicitud(payload) {
         calle: item.calle || '',
         numero: item.numero || '',
         telefono: item.telefono || '',
-        comentario: item.comentario || ''
+        comentario: item.comentario || '',
+        direccionDestino: item.direccionDestino || ''
       }))
     : [{
         id: `individual-${Date.now()}`,
         tipoServicio: 'Individual',
         nombre: payload.datos?.nombreEmp || 'Cliente',
         programador: usuarioActual?.nombre || '',
-        localidad: payload.datos?.localidad || '',
+        localidad: payload.datos?.viaje === 'Temporal' ? 'Temporal' : (payload.datos?.localidad || ''),
         viaje: payload.datos?.viaje || '',
         ...coordenadasDePlanta(payload.datos?.localidad),
         fechaEntrada: payload.datos?.fechaEntrada || '',
@@ -605,7 +757,8 @@ async function registrarSolicitud(payload) {
         calle: payload.datos?.calleInput || payload.datos?.calle || '',
         numero: payload.datos?.numeroInput || payload.datos?.numero || '',
         telefono: payload.datos?.telefono || '',
-        comentario: payload.datos?.comentario || ''
+        comentario: payload.datos?.comentario || '',
+        direccionDestino: [payload.datos?.temporalCalle, payload.datos?.temporalNumero, payload.datos?.temporalColonia, payload.datos?.temporalCiudad, payload.datos?.temporalCp, 'México'].filter(Boolean).join(', ')
       }];
 
   const usuarioAutenticado = await TAXI_FIREBASE.ensureSession();
@@ -1341,6 +1494,7 @@ async function abrirPanelFirebase(usuarioFirebase) {
   document.querySelectorAll('[data-solo-admin]').forEach(elemento => elemento.classList.toggle('hidden', usuarioActual.rol !== 'admin'));
   document.getElementById('sesionUsuarioNombre').textContent = usuarioActual.nombre;
   if (usuarioActual.rol === 'admin') renderUsuariosAdmin();
+  if (usuarioActual.rol === 'admin') renderLocalidadesAdmin();
   renderChoferesAdmin();
   mostrarVistaAdmin('programacion');
   renderSolicitudesAdmin().catch(error => console.error('No se pudo cargar la asignación de rutas:', error));
@@ -1526,6 +1680,14 @@ function crearFilaMasiva(valores = {}) {
       input.value = valores[columna] || '';
       input.className = 'w-full rounded-lg border border-slate-300 bg-white px-2 py-2';
       celda.appendChild(input);
+    } else if (columna === 'localidad') {
+      const select = document.createElement('select');
+      select.className = 'w-full rounded-lg border border-slate-300 bg-white px-2 py-2';
+      select.dataset.localidadSelect = 'true';
+      select.add(new Option('Seleccione...', ''));
+      obtenerLocalidades().filter(item => item.activo !== false).forEach(item => select.add(new Option(item.nombre, item.id)));
+      select.value = valores.localidad || '';
+      celda.appendChild(select);
     } else if (columna === 'viaje') {
       const select = document.createElement('select');
       select.className = 'w-full rounded-lg border border-slate-300 bg-white px-2 py-2';
@@ -1596,6 +1758,13 @@ function crearFilaMasiva(valores = {}) {
 
   cuerpoTablaMasivo.appendChild(fila);
   actualizarCamposDeFila(fila);
+  const fecha = fila.cells[4].querySelector('input');
+  const horas = [fila.querySelector('[data-horario="entrada"]'), fila.querySelector('[data-horario="salida"]')];
+  const actualizarMinimos = () => horas.forEach(hora => actualizarMinimosFechaHora(fecha, hora));
+  actualizarMinimos();
+  fecha.addEventListener('focus', actualizarMinimos);
+  fecha.addEventListener('change', actualizarMinimos);
+  horas.forEach(hora => hora.addEventListener('focus', actualizarMinimos));
   return fila;
 }
 
@@ -1697,6 +1866,12 @@ document.getElementById('btnCerrarModalRutas').addEventListener('click', cerrarM
 btnProbarRuta.addEventListener('click', probarRuta);
 formularioAltaUsuario.addEventListener('submit', registrarUsuarioProgramador);
 formularioAltaChofer.addEventListener('submit', registrarChofer);
+formularioAltaLocalidad.addEventListener('submit', event => {
+  registrarLocalidad(event).catch(error => {
+    console.error('No se pudo guardar la localidad:', error);
+    alert('No se pudo guardar la localidad en Firebase.');
+  });
+});
 document.querySelectorAll('[data-ir-vista]').forEach(boton => {
   boton.addEventListener('click', () => mostrarVistaAdmin(boton.dataset.irVista));
 });
@@ -1720,6 +1895,10 @@ tablaUsuarios.addEventListener('click', event => {
 tablaChoferes.addEventListener('click', event => {
   const boton = event.target.closest('[data-eliminar-chofer]');
   if (boton) eliminarChofer(boton.dataset.eliminarChofer);
+});
+tablaLocalidades.addEventListener('click', event => {
+  const boton = event.target.closest('[data-toggle-localidad]');
+  if (boton) cambiarEstadoLocalidad(boton.dataset.toggleLocalidad).catch(error => console.error('No se pudo cambiar la localidad:', error));
 });
 gruposRutasAdmin.addEventListener('change', async event => {
   const selector = event.target.closest('[data-asignar-ruta]');
@@ -1764,6 +1943,8 @@ form.addEventListener('submit', event => {
 });
 
 crearFilaMasiva();
+configurarMinimosFechasIndividuales();
+cargarLocalidades().catch(error => console.error('No se pudieron cargar las localidades:', error));
 cargarCp().catch(error => console.error(error));
 TAXI_FIREBASE.ready.then(usuarioFirebase => {
   if (!usuarioFirebase.isAnonymous) {
