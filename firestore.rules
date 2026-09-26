@@ -21,11 +21,11 @@ service cloud.firestore {
     }
 
     match /requests/{requestId} {
-      allow create: if signedIn()
+      allow create: if isAdmin() || (signedIn()
         && request.resource.data.keys().hasAll(['id', 'nombre', 'fecha', 'hora', 'direccion'])
         && request.resource.data.id == requestId
         && request.resource.data.nombre is string
-        && request.resource.data.direccion is string;
+        && request.resource.data.direccion is string);
       allow read, update, delete: if canManageOperations();
     }
 
