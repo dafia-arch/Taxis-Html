@@ -28,10 +28,13 @@ const firebaseReady = new Promise((resolve, reject) => {
   }, reject);
 });
 
+const db = firebase.firestore();
+db.enablePersistence({ synchronizeTabs: true }).catch(console.warn);
+
 window.taxiFirebase = {
   auth: firebaseAuth,
-  db: firebase.firestore(),
-  adminUid: 'xW9j182ayrcB0xyIrCOn84SRtBN2',
+  db: db,
+  storage: firebase.storage(),
   ready: firebaseReady,
   async ensureSession() {
     await firebaseReady;

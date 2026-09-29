@@ -5,9 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Solicitud de Taxi BIC</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="manifest.json">
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(err => console.log('SW Error:', err));
+      });
+    }
+  </script>
 </head>
 <body class="min-h-screen bg-[radial-gradient(circle_at_top,_#dbeafe_0%,_#f8fafc_35%,_#e2e8f0_100%)] px-4 py-10 text-slate-800 sm:px-6">
-  <div class="mx-auto max-w-6xl overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/90 shadow-[0_30px_80px_rgba(15,23,42,0.12)] backdrop-blur-sm">
+  <div id="vistaCliente" class="mx-auto max-w-6xl overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/90 shadow-[0_30px_80px_rgba(15,23,42,0.12)] backdrop-blur-sm">
     
     <!-- Encabezado -->
     <header class="relative overflow-hidden border-b border-slate-200 bg-slate-950 px-6 py-7 sm:px-8">
@@ -64,6 +72,7 @@
               <option value="Entrada">Entrada</option>
               <option value="Salida">Salida</option>
               <option value="Redondo">Redondo</option>
+              <option value="Temporal">Domicilio temporal</option>
             </select>
           </label>
 
@@ -193,7 +202,6 @@
                 <th class="px-3 py-3">Número</th>
                 <th class="px-3 py-3">Teléfono</th>
                 <th class="px-3 py-3">Comentario</th>
-                <th class="px-3 py-3">Destino temporal</th>
                 <th class="px-3 py-3">Acción</th>
               </tr>
             </thead>
@@ -224,12 +232,15 @@
     </form>
   </div>
 
-  <section id="adminPortal" class="mt-10">
+  <section id="adminPortal" class="mt-10 hidden">
     <div class="rounded-3xl border border-slate-200 bg-slate-50 p-5 shadow-[0_8px_30px_rgba(15,23,42,0.04)] sm:p-6">
       <div id="adminLoginBox" class="mx-auto max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div class="mb-5 text-center">
-          <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Pantalla 2 · Acceso</p>
-          <h2 class="mt-2 text-2xl font-bold text-slate-800">Inicia sesión</h2>
+        <div class="mb-5 flex justify-between items-center text-center">
+          <div class="text-left">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Pantalla 2 · Acceso</p>
+            <h2 class="mt-2 text-2xl font-bold text-slate-800">Inicia sesión</h2>
+          </div>
+          <button id="btnVolverCliente1" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-bold text-slate-700 hover:bg-slate-100">Volver a inicio</button>
         </div>
         <div class="space-y-4">
           <label class="block">
@@ -256,13 +267,17 @@
             <button id="btnRecalcularRutas" type="button" class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100">Recalcular rutas</button>
             <button id="btnDescargarExcelProgramacion" type="button" class="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-800 hover:bg-emerald-100">Descargar Excel</button>
             <button id="btnCerrarSesionAdmin" type="button" class="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-100">Cerrar sesión</button>
+            <button id="btnVolverCliente2" type="button" class="rounded-xl border border-blue-400/60 bg-blue-500/10 px-4 py-2 text-sm font-bold text-blue-700 hover:bg-blue-100">Volver a inicio</button>
           </div>
         </div>
 
         <nav class="mb-6 flex flex-wrap gap-2 border-b border-slate-200 pb-3" aria-label="Vistas de administración">
           <button type="button" data-ir-vista="programacion" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-bold text-white">Pantalla 3 · Programación</button>
+          <button type="button" data-ir-vista="confirmacion" class="rounded-lg bg-white px-4 py-2 text-sm font-bold text-slate-700">Pantalla 4 · Confirmación</button>
           <button type="button" data-ir-vista="usuarios" data-solo-admin class="rounded-lg bg-white px-4 py-2 text-sm font-bold text-slate-700">Pantalla 5 · Alta de usuarios</button>
           <button type="button" data-ir-vista="choferes" data-solo-admin class="rounded-lg bg-white px-4 py-2 text-sm font-bold text-slate-700">Pantalla 6 · Alta de choferes</button>
+          <button type="button" data-ir-vista="roles" data-solo-admin class="rounded-lg bg-white px-4 py-2 text-sm font-bold text-slate-700">Pantalla 7 · Roles</button>
+          <button type="button" data-ir-vista="analytics" class="rounded-lg bg-white px-4 py-2 text-sm font-bold text-slate-700">Pantalla 8 · Analíticas</button>
           <button type="button" data-ir-vista="localidades" data-solo-admin class="rounded-lg bg-white px-4 py-2 text-sm font-bold text-slate-700">Localidades</button>
           <button id="btnMostrarLogin" type="button" class="ml-auto rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700">Cambiar usuario</button>
         </nav>
@@ -333,6 +348,27 @@
             <div id="gruposRutasAdmin" class="space-y-3"></div>
           </div>
         </div>
+        </section>
+
+        <section id="vistaConfirmacion" data-vista-panel="confirmacion" class="hidden">
+          <div class="mb-5">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Pantalla 4</p>
+            <h3 class="text-xl font-bold text-slate-800">Confirmación de abordaje y evidencias</h3>
+            <p class="mt-1 text-sm text-slate-600">Selecciona una ruta asignada para confirmar los pasajeros y registrar ausencias.</p>
+          </div>
+          
+          <div class="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
+            <label class="block text-sm font-semibold text-slate-700">Seleccionar ruta
+              <select id="selectRutaConfirmacion" class="mt-2 w-full max-w-md rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2.5 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+                <option value="">Seleccione una ruta asignada...</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="contenedorPasajerosConfirmacion" class="space-y-4">
+            <!-- Los pasajeros de la ruta seleccionada se renderizarán aquí -->
+            <p class="text-sm text-slate-500">Por favor selecciona una ruta para ver los pasajeros.</p>
+          </div>
         </section>
 
         <section id="vistaUsuarios" data-vista-panel="usuarios" class="hidden">
@@ -424,6 +460,46 @@
           </div>
         </section>
 
+        <section id="vistaRoles" data-vista-panel="roles" class="hidden">
+          <div class="mb-5">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Pantalla 7</p>
+            <h3 class="text-xl font-bold text-slate-800">Roles y Permisos Dinámicos</h3>
+            <p class="mt-1 text-sm text-slate-600">Otorga o revoca el rol de Administrador a usuarios registrados.</p>
+          </div>
+          <div class="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
+            <div id="listaRolesAdmin" class="space-y-3">
+              <p class="text-sm text-slate-500">Cargando usuarios...</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="vistaAnalytics" data-vista-panel="analytics" class="hidden">
+          <div class="mb-5">
+            <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Pantalla 8</p>
+            <h3 class="text-xl font-bold text-slate-800">Analíticas y Estadísticas</h3>
+            <p class="mt-1 text-sm text-slate-600">Resumen de costos, incidencias y volumen de viajes.</p>
+          </div>
+          
+          <div class="mb-6 grid gap-4 md:grid-cols-3">
+            <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-rose-500">Ausencias ("No Salió")</p>
+              <p id="statNoSalio" class="mt-2 text-3xl font-black text-rose-900">0</p>
+            </div>
+            <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-500">Pasajeros Confirmados</p>
+              <p id="statConfirmados" class="mt-2 text-3xl font-black text-emerald-900">0</p>
+            </div>
+            <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+              <p class="text-xs font-semibold uppercase tracking-[0.2em] text-blue-500">Costo Est. Acumulado</p>
+              <p id="statCosto" class="mt-2 text-3xl font-black text-blue-900">$0.00</p>
+            </div>
+          </div>
+
+          <div class="rounded-2xl border border-slate-200 bg-white p-4">
+            <canvas id="graficoViajes" width="400" height="150"></canvas>
+          </div>
+        </section>
+
         <section id="vistaLocalidades" data-vista-panel="localidades" class="hidden">
           <div class="mb-5">
             <p class="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Configuración operativa</p>
@@ -477,13 +553,21 @@
     </div>
   </div>
 
-  <!-- Define window.TAXI_API_BASE_URL con la URL pública del backend antes de app,js. -->
-  <script>window.TAXI_API_BASE_URL = 'https://taxis-html.onrender.com';</script>
+  <!-- Define window.TAXI_API_BASE_URL con la URL pública del backend antes de app.js. -->
+  <script>
+    // Forzamos el uso del servidor en línea para que funcione la API de LocationIQ 
+    // sin necesidad de tener Node.js instalado localmente.
+    window.TAXI_API_BASE_URL = 'https://taxis-html.onrender.com';
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-storage-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="firebase-config.js"></script>
-  <script src="app,js"></script>
+  <script src="app.js"></script>
+  <script src="pantalla-confirmacion.js"></script>
+  <script src="pantalla-extras.js"></script>
 </body>
 </html>

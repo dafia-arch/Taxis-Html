@@ -1,0 +1,11 @@
+{
+  "name": "taxis-html",
+  "version": "1.0.0",
+  "description": "Solicitud de Taxi BIC",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

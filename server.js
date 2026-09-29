@@ -57,9 +57,7 @@ function serveStatic(request, response) {
     return;
   }
 
-  const contentType = path.basename(filePath) === 'app,js'
-    ? mimeTypes['.js']
-    : mimeTypes[path.extname(filePath)] || 'application/octet-stream';
+  const contentType = mimeTypes[path.extname(filePath)] || 'application/octet-stream';
   response.writeHead(200, {
     'Content-Type': contentType,
     'Cache-Control': 'no-store, no-cache, must-revalidate'

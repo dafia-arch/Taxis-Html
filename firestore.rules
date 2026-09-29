@@ -7,7 +7,10 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return signedIn() && request.auth.uid == 'xW9j182ayrcB0xyIrCOn84SRtBN2';
+      return signedIn() && (
+        exists(/databases/$(database)/documents/roles/$(request.auth.uid)) ||
+        (exists(/databases/$(database)/documents/operators/$(request.auth.uid)) && get(/databases/$(database)/documents/operators/$(request.auth.uid)).data.rol == 'admin')
+      );
     }
 
     function isActiveOperator() {
